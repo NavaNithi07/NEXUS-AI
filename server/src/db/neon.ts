@@ -87,11 +87,14 @@ export async function initializeNeonSchema(): Promise<boolean> {
         id VARCHAR(64) PRIMARY KEY,
         email VARCHAR(255) UNIQUE NOT NULL,
         password_hash TEXT NOT NULL,
+        name VARCHAR(255) DEFAULT '',
         role VARCHAR(32) NOT NULL DEFAULT 'operator',
         failed_attempts INTEGER DEFAULT 0,
         lockout_until BIGINT,
         created_at TEXT NOT NULL
       );
+
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS name VARCHAR(255) DEFAULT '';
 
       CREATE TABLE IF NOT EXISTS refresh_tokens (
         token_hash VARCHAR(64) PRIMARY KEY,

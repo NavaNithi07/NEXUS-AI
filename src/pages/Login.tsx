@@ -76,10 +76,27 @@ export const Login: React.FC = () => {
       return;
     }
 
+    if (isRegisterMode) {
+      if (!fullName.trim()) {
+        setErrorMsg('Please enter your operator name.');
+        return;
+      }
+    }
+
     setIsLoading(true);
 
     try {
-      const authRes = await api.auth.login({ email: email.trim(), password });
+      let authRes;
+      if (isRegisterMode) {
+        authRes = await api.auth.register({
+          email: email.trim(),
+          password,
+          name: fullName.trim(),
+        });
+      } else {
+        authRes = await api.auth.login({ email: email.trim(), password });
+      }
+
       login(authRes.user.email, authRes.user.name, authRes.token);
       setIsLoading(false);
       const from = (location.state as any)?.from?.pathname || '/';

@@ -8,7 +8,7 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
-    "test": "tsx test/e2e.test.ts && tsx test/security_hardening.test.ts && tsx test/bank_grade_security.test.ts && tsx test/priority_verification.test.ts && tsx test/transaction_builder.test.ts"
+    "test": "tsx test/e2e.test.ts && tsx test/security_hardening.test.ts && tsx test/bank_grade_security.test.ts && tsx test/priority_verification.test.ts && tsx test/transaction_builder.test.ts && tsx test/registration.test.ts"
   },
   "dependencies": {
     "@types/better-sqlite3": "^9.6.0",

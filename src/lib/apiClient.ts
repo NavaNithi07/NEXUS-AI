@@ -61,6 +61,16 @@ export class ApiError extends Error {
 // ── Health & Status ────────────────────────────────────────────────────────────
 export const api = {
   auth: {
+    register: (payload: { email: string; password: string; name?: string }) =>
+      apiFetch<{
+        token: string;
+        refreshToken?: string;
+        user: { userId: string; email: string; role: string; name: string };
+        expiresIn: string;
+      }>('/api/auth/register', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
     login: (credentials: { email: string; password: string }) =>
       apiFetch<{
         token: string;

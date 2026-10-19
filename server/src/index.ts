@@ -31,6 +31,8 @@ import {
   rotateRefreshToken,
   revokeRefreshToken,
   verifyPassword,
+  registerUser,
+  authenticateUser,
 } from './auth/service.js';
 import { reconcileTransactions } from './blockchain/reconciliation.js';
 import {
@@ -107,8 +109,94 @@ app.use((req: Request, _res: Response, next: NextFunction) => {
 });
 
 // ════════════════════════════════════════════════════════════════════════════════
-// 0. Authentication: Login, Refresh & Logout
+// 0. Authentication: Registration, Login, Refresh & Logout
 // ════════════════════════════════════════════════════════════════════════════════
+
+app.post('/api/auth/register', loginLimiter, async (req: Request, res: Response) => {
+  const { email, password, name } = req.body || {};
+
+  if (!email || !password) {
+    return res.status(400).json({
+      error: 'Bad Request',
+      message: 'Both email and password are required',
+    });
+  }
+
+  const normalizedEmail = String(email).trim().toLowerCase();
+
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+    return res.status(400).json({
+      error: 'Bad Request',
+      message: 'Invalid email address format.',
+    });
+  }
+
+  if (String(password).length < 6) {
+    return res.status(400).json({
+      error: 'Bad Request',
+      message: 'Password must be at least 6 characters.',
+    });
+  }
+
+  try {
+    const user = await registerUser(
+      normalizedEmail,
+      String(password),
+      name ? String(name).trim() : undefined,
+      'operator'
+    );
+
+    const accessToken = signAccessToken(user, '15m');
+    const { refreshToken, expiresInSeconds } = generateRefreshToken(user);
+
+    db.addAuditRecord({
+      id: `audit-${Date.now()}`,
+      timestamp: new Date().toISOString(),
+      agentId: 'system',
+      agentName: 'Authentication Gateway',
+      taskGoal: 'Operator Account Created',
+      proposal: {
+        task: 'Account Registration',
+        action: 'none',
+        chainId: config.chainId,
+        recipient: '0x0000000000000000000000000000000000000000',
+        token: 'N/A',
+        amount: 0,
+        reason: 'New operator registered',
+        confidence: 1,
+      },
+      policyCheck: {
+        approved: true,
+        violations: [],
+        checks: {
+          agentActive: true,
+          killswitchDisengaged: true,
+          recipientAllowlisted: true,
+          singleTxLimitPassed: true,
+          dailyBudgetPassed: true,
+          networkSupported: true,
+          balanceSufficient: true,
+        },
+      },
+      outcome: 'confirmed',
+      details: `Operator account created for ${user.email} (${user.name}). Issued 15-minute access token and rotated refresh token.`,
+    });
+
+    return res.status(201).json({
+      token: accessToken,
+      refreshToken,
+      user,
+      expiresIn: '15m',
+      refreshExpiresInSeconds: expiresInSeconds,
+    });
+  } catch (err: any) {
+    const isConflict = err.message?.includes('already exists');
+    return res.status(isConflict ? 409 : 500).json({
+      error: isConflict ? 'Conflict' : 'Registration Failed',
+      message: err.message,
+    });
+  }
+});
 
 app.post('/api/auth/login', loginLimiter, async (req: Request, res: Response) => {
   const { email, password } = req.body || {};
@@ -132,11 +220,10 @@ app.post('/api/auth/login', loginLimiter, async (req: Request, res: Response) =>
     });
   }
 
-  // 2. Validate credentials with timing-safe check and scrypt support
-  const emailValid = timingSafeEqual(normalizedEmail, config.operatorEmail.toLowerCase());
-  const passwordValid = timingSafeEqual(String(password), config.operatorPassword);
+  // 2. Validate credentials against default operator or registered database users
+  const authenticatedUser = await authenticateUser(normalizedEmail, String(password));
 
-  if (!emailValid || !passwordValid) {
+  if (!authenticatedUser) {
     const attemptResult = recordFailedAttempt(normalizedEmail);
 
     // Audit failed login attempt
@@ -191,10 +278,10 @@ app.post('/api/auth/login', loginLimiter, async (req: Request, res: Response) =>
 
   // 4. Issue access token and rotated refresh token
   const userPayload = {
-    userId: 'usr-operator-01',
-    email: config.operatorEmail,
-    role: 'operator' as const,
-    name: 'Chief Treasury Operator',
+    userId: authenticatedUser.userId,
+    email: authenticatedUser.email,
+    role: authenticatedUser.role,
+    name: authenticatedUser.name,
   };
 
   const accessToken = signAccessToken(userPayload, '15m');

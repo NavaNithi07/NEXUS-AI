@@ -16,11 +16,16 @@ console.log('=================================================================')
 const mockAgent: BackendAgent = {
   id: 'agt-test-builder',
   name: 'Treasury Safe Transfer Enclave',
+  description: 'Test agent for safe transfer simulation',
+  type: 'Treasury Manager',
   status: 'active',
-  role: 'Treasury Safe Transfer',
+  balance: 1.0,
   maxTxAmount: 0.1,
   dailyLimit: 0.5,
   spentToday: 0.0,
+  txCount: 0,
+  createdAt: new Date().toISOString(),
+  lastActive: 'Just now',
   allowedTokens: ['ETH'],
   allowedRecipients: ['0x1111111111111111111111111111111111111111'],
 };
@@ -29,8 +34,10 @@ const mockPolicies: BackendSpendingPolicy[] = [
   {
     id: 'pol-builder-global',
     name: 'Safe Transfer Ceiling',
+    description: 'Global safe transfer policy',
     maxSingleTx: 0.1,
     maxDailySpend: 0.5,
+    requireApprovalAbove: 0.05,
     allowedTokens: ['ETH'],
     targetAgent: 'all',
     status: 'active',

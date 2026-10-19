@@ -24,11 +24,19 @@ function initializeSchema(db: Database.Database): void {
       id TEXT PRIMARY KEY,
       email TEXT UNIQUE NOT NULL,
       password_hash TEXT NOT NULL,
+      name TEXT DEFAULT '',
       role TEXT NOT NULL DEFAULT 'operator',
       failed_attempts INTEGER DEFAULT 0,
       lockout_until INTEGER,
       created_at TEXT NOT NULL
     );
+  `);
+
+  try {
+    db.exec("ALTER TABLE users ADD COLUMN name TEXT DEFAULT ''");
+  } catch {}
+
+  db.exec(`
 
     CREATE TABLE IF NOT EXISTS refresh_tokens (
       token_hash TEXT PRIMARY KEY,

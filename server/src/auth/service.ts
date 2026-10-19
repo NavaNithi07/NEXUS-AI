@@ -386,3 +386,130 @@ export function revokeRefreshToken(rawToken: string): boolean {
 
   return Boolean(record);
 }
+
+/**
+ * Register a new operator account with scrypt password hashing
+ */
+export async function registerUser(
+  email: string,
+  password: string,
+  name?: string,
+  role: 'operator' | 'admin' | 'viewer' = 'operator'
+): Promise<{ userId: string; email: string; role: 'operator' | 'admin' | 'viewer'; name: string }> {
+  const normalizedEmail = email.trim().toLowerCase();
+
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+    throw new Error('Invalid email address format.');
+  }
+
+  if (!password || password.length < 6) {
+    throw new Error('Password must be at least 6 characters.');
+  }
+
+  const db = getDb();
+
+  // Check default operator email
+  if (normalizedEmail === config.operatorEmail.toLowerCase()) {
+    throw new Error('An account with this email address already exists.');
+  }
+
+  // Check local database
+  const existingLocal = db.prepare('SELECT id FROM users WHERE LOWER(email) = ?').get(normalizedEmail);
+  if (existingLocal) {
+    throw new Error('An account with this email address already exists.');
+  }
+
+  // Check Neon if available
+  if (getNeonPool()) {
+    try {
+      const neonRes = await queryNeon('SELECT id FROM users WHERE LOWER(email) = $1', [normalizedEmail]);
+      if (neonRes && neonRes.rows.length > 0) {
+        throw new Error('An account with this email address already exists.');
+      }
+    } catch (err: any) {
+      if (err.message.includes('already exists')) throw err;
+    }
+  }
+
+  const passwordHash = await hashPassword(password);
+  const userId = `usr-${Date.now().toString(36)}-${crypto.randomBytes(4).toString('hex')}`;
+  const userName = (name && name.trim()) ? name.trim() : normalizedEmail.split('@')[0];
+  const createdAt = new Date().toISOString();
+
+  db.prepare(`
+    INSERT INTO users (id, email, password_hash, name, role, failed_attempts, created_at)
+    VALUES (?, ?, ?, ?, ?, 0, ?)
+  `).run(userId, normalizedEmail, passwordHash, userName, role, createdAt);
+
+  if (getNeonPool()) {
+    queryNeon(`
+      INSERT INTO users (id, email, password_hash, name, role, failed_attempts, created_at)
+      VALUES ($1, $2, $3, $4, $5, 0, $6)
+      ON CONFLICT (email) DO NOTHING
+    `, [userId, normalizedEmail, passwordHash, userName, role, createdAt]).catch((e) => {
+      console.warn('[Auth Service] Neon user sync:', e.message);
+    });
+  }
+
+  return {
+    userId,
+    email: normalizedEmail,
+    role,
+    name: userName,
+  };
+}
+
+/**
+ * Authoritatively authenticate a user against the operator credentials or the persistent user database
+ */
+export async function authenticateUser(
+  email: string,
+  password: string
+): Promise<{ userId: string; email: string; role: 'operator' | 'admin' | 'viewer'; name: string } | null> {
+  const normalizedEmail = email.trim().toLowerCase();
+
+  // 1. Check default environment operator credentials
+  const isDefaultOperatorEmail = normalizedEmail === config.operatorEmail.toLowerCase();
+  const isDefaultOperatorPassword = String(password) === config.operatorPassword;
+  if (isDefaultOperatorEmail && isDefaultOperatorPassword) {
+    return {
+      userId: 'usr-operator-01',
+      email: config.operatorEmail,
+      role: 'operator',
+      name: 'Chief Treasury Operator',
+    };
+  }
+
+  // 2. Query persistent database
+  const db = getDb();
+  let record: any = null;
+  try {
+    record = db.prepare('SELECT id, email, password_hash, name, role FROM users WHERE LOWER(email) = ?').get(normalizedEmail);
+  } catch {}
+
+  if (!record && getNeonPool()) {
+    try {
+      const neonRes = await queryNeon('SELECT id, email, password_hash, name, role FROM users WHERE LOWER(email) = $1', [normalizedEmail]);
+      if (neonRes && neonRes.rows.length > 0) {
+        record = neonRes.rows[0];
+      }
+    } catch {}
+  }
+
+  if (!record || !record.password_hash) {
+    return null;
+  }
+
+  const isPasswordValid = await verifyPassword(String(password), record.password_hash);
+  if (!isPasswordValid) {
+    return null;
+  }
+
+  return {
+    userId: record.id,
+    email: record.email,
+    role: (record.role as any) || 'operator',
+    name: record.name || record.email.split('@')[0],
+  };
+}
+
