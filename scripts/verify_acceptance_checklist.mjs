@@ -21,6 +21,16 @@ function assert(condition, title, details = '') {
   }
 }
 
+function getOperatorPassword() {
+  if (process.env.OPERATOR_PASSWORD) return process.env.OPERATOR_PASSWORD;
+  const envPath = path.resolve(process.cwd(), 'server/.env');
+  if (fs.existsSync(envPath)) {
+    const match = fs.readFileSync(envPath, 'utf8').match(/^OPERATOR_PASSWORD=["']?([^"'\r\n]+)["']?/m);
+    if (match) return match[1].trim();
+  }
+  return '';
+}
+
 async function run() {
   // ──────────────────────────────────────────────────────────────────────────
   // CHECK 1: Verify the Login Flow
@@ -28,12 +38,13 @@ async function run() {
   console.log('--- CHECK 1: Verify Login Flow & JWT Issuance ---');
   let operatorToken = '';
   try {
+    const operatorPassword = getOperatorPassword();
     const loginRes = await fetch(`${API_BASE}/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         email: 'operator@nexus.ai',
-        password: process.env.OPERATOR_PASSWORD || 'NexusVault_2026!SecOps_Alpha',
+        password: operatorPassword,
       }),
     });
     const loginData = await loginRes.json();

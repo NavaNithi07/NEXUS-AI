@@ -52,6 +52,12 @@ export const config: AppConfig = {
   })(),
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || '2h',
   operatorEmail: process.env.OPERATOR_EMAIL || 'operator@nexus.ai',
-  operatorPassword: process.env.OPERATOR_PASSWORD || 'NexusVault_2026!SecOps_Alpha',
+  operatorPassword: (() => {
+    const pass = process.env.OPERATOR_PASSWORD;
+    if (!pass || pass.trim().length < 8) {
+      throw new Error('[Security Config Error] OPERATOR_PASSWORD environment variable is required and must be at least 8 characters.');
+    }
+    return pass.trim();
+  })(),
 };
 

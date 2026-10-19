@@ -27,9 +27,9 @@ The Nexus AI Wallet Platform has undergone an exhaustive multi-phase audit, secu
 4. **Comprehensive Documentation**: Transformed default README into an institutional setup guide covering architecture, safe testnet credentials, and environment variable references.
 5. **Demonstration Artifacts**: Captured 5 presentation-ready screenshots in `docs/screenshots/` showcasing Dashboard, Policies, Transactions, Monitoring, and Emergency Stop.
 
-### 4. Remaining Blockers
+### 4. Remaining Blockers & Precise Blockchain Scope
 - **None for Hackathon Demonstration**: All demo flows (rehearsed policy rejections, allowlist blocks, idempotency caching, and circuit breaker activation) execute with 100% reliability.
-- **Note on Live Testnet Funds**: The dedicated testnet wallet currently holds 0.0000 ETH on Base Sepolia. Read-only on-chain RPC operations are verified; attempting live on-chain broadcasts correctly fails closed before signing due to the built-in balance check.
+- **Precise Blockchain Verification Scope**: The dedicated testnet wallet currently holds 0.0000 ETH on Base Sepolia. Read-only on-chain RPC operations (Chain ID 84532, address derivation, nonce, gas estimation with buffers and caps) and pre-flight policy controls are verified. Because the wallet is unfunded, live broadcast attempts correctly halt closed before signing. The project has verified blockchain integration and transaction controls—not a completed on-chain broadcast transfer receipt.
 
 ---
 
@@ -97,11 +97,12 @@ The Nexus AI Wallet Platform has undergone an exhaustive multi-phase audit, secu
 - **Nonce Query**: Verified current account nonce is `0`.
 - **Pre-Flight Gas Simulation**: Verified dynamic EIP-1559 base + priority fee calculations with +20% safety buffer and 100 Gwei hard cap.
 
-### 3. Live Broadcast Status: **SIMULATED / BLOCKED BY ZERO BALANCE**
-- Because the testnet address holds `0 ETH`, attempting a live on-chain broadcast correctly triggers the balance safety check:
+### 3. Live Broadcast Status: **PRE-FLIGHT CONTROLS VERIFIED (NOT A COMPLETED ON-CHAIN TRANSFER)**
+- The testnet signer wallet currently holds `0 ETH` on Base Sepolia.
+- Because no testnet faucet funds were deposited into this address, attempting a transfer proposal correctly triggers the pre-flight balance safety check:
   `"Insufficient testnet wallet balance: Required 0.001 ETH, but wallet currently holds 0.0000 ETH."`
-- The transaction fails closed before signing, protecting the network from failed gas expenditures.
-- All policy rejection, allowlist enforcement, idempotency caching, and emergency killswitch mechanisms were verified end-to-end using simulated pre-flight executions.
+- The system safely intercepts the transaction and halts closed before signing.
+- **Accurate Scope Statement**: The project has thoroughly verified end-to-end blockchain RPC connectivity, Base Sepolia network identity (Chain ID 84532), address derivation, live account querying, dynamic gas fee estimation with buffers and caps, and pre-flight transaction controls—**not a completed live broadcast on-chain transfer receipt**. All policy rejection, allowlist enforcement, idempotency caching, and emergency killswitch mechanisms were verified end-to-end using simulated pre-flight executions.
 
 ---
 

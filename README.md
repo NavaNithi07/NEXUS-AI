@@ -35,10 +35,10 @@ All sensitive backend configuration is managed via `server/.env` (excluded from 
 | `JWT_SECRET` | **Required** | *(32+ hex chars)* | HMAC-SHA256 secret for signing operator JWTs (min 16 chars). |
 | `JWT_EXPIRES_IN` | Optional | `2h` | Access token lifespan (e.g. `2h`, `1d`). |
 | `OPERATOR_EMAIL` | **Required** | `operator@nexus.ai` | Vault operator login email. |
-| `OPERATOR_PASSWORD` | **Required** | `NexusVault_2026!SecOps_Alpha` | Rotated secure password (quoted in `.env`). |
+| `OPERATOR_PASSWORD` | **Required** | *(Configured in `server/.env`)* | Vault operator authentication password. |
 
 > [!IMPORTANT]
-> `server/.env` is excluded from Git via `.gitignore`. Never reveal private keys, JWT secrets, or production passwords during demo presentations or public recordings.
+> `server/.env` is excluded from Git via `.gitignore`. Never reveal private keys, JWT secrets, or production passwords in source code, README, screenshots, Git commits, or presentations.
 
 ---
 
@@ -110,9 +110,9 @@ npm run build
 
 ---
 
-## 6. Known Limitations
-
-1. **Testnet Wallet Funding**: The testnet signer wallet currently holds `0 ETH`. Attempting a live on-chain broadcast correctly fails closed with an insufficient balance notice. Read-only on-chain RPC operations are fully verified.
+## 6. Known Limitations & Precise Blockchain Scope
+ 
+1. **Precise Blockchain Testing Scope**: The testnet signer wallet currently holds `0 ETH` on Base Sepolia. The platform has verified read-only blockchain RPC connectivity, contract-free native account status, and pre-flight transaction controls—**not a completed on-chain broadcast transfer receipt**. Attempting an execution correctly halts closed with an insufficient balance violation before cryptographic signing.
 2. **AI Provider Mode**: Set to `deterministic` by default for zero-latency, predictable hackathon demonstrations. An external LLM can be connected by setting `AI_PROVIDER=llm` and providing `AI_API_KEY`.
 3. **Development Dependencies**: Minor npm audit warnings in dev tooling (`esbuild`, `tailwindcss@3.4`) are retained intentionally to preserve frontend layout stability.
 
@@ -120,9 +120,9 @@ npm run build
 
 ## 7. 5-Minute Reproducible Demo Script
 
-### Demo Credentials
+### Demo Operator Authentication
 - **Email**: `operator@nexus.ai`
-- **Password**: `NexusVault_2026!SecOps_Alpha`
+- **Password**: Enter the `OPERATOR_PASSWORD` value configured in your local `server/.env`.
 
 ### Demo Steps:
 1. **0:00 - 1:00 | Login & Dashboard**

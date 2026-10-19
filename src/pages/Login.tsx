@@ -90,23 +90,12 @@ export const Login: React.FC = () => {
     }
   };
 
-  const handleDemoOneClick = async () => {
+  const handleDemoOneClick = () => {
     setEmail('operator@nexus.ai');
-    setPassword('NexusVault_2026!SecOps_Alpha');
     setErrorMsg(null);
-    setIsLoading(true);
-
-    try {
-      const authRes = await api.auth.login({ email: 'operator@nexus.ai', password: 'NexusVault_2026!SecOps_Alpha' });
-      login(authRes.user.email, authRes.user.name, authRes.token);
-      setIsLoading(false);
-      const from = (location.state as any)?.from?.pathname || '/';
-      navigate(from, { replace: true });
-    } catch {
-      login('operator@nexus.ai', 'Lead Treasury Operator');
-      setIsLoading(false);
-      const from = (location.state as any)?.from?.pathname || '/';
-      navigate(from, { replace: true });
+    const passInput = document.getElementById('operator-password-input');
+    if (passInput) {
+      passInput.focus();
     }
   };
 
@@ -374,6 +363,7 @@ export const Login: React.FC = () => {
                 <div className="relative">
                   <Lock className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500" />
                   <input
+                    id="operator-password-input"
                     type={showPassword ? 'text' : 'password'}
                     required
                     autoComplete="current-password"
