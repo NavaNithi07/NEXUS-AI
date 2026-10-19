@@ -116,7 +116,7 @@ async function runBankGradeTests() {
 
   // Attempt replay attack with old token 1 -> MUST BE REJECTED
   const replayAttempt = rotateRefreshToken(token1);
-  assert(replayAttempt.valid === false && (replayAttempt.error?.includes('revoked') || replayAttempt.error?.includes('reuse')),
+  assert(replayAttempt.valid === false && Boolean(replayAttempt.error?.includes('revoked') || replayAttempt.error?.includes('reuse')),
     'Reusing an already-rotated refresh token is detected and blocked as replay attack');
 
   // Revoke token on logout

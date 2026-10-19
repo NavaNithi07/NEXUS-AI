@@ -565,12 +565,17 @@ app.post('/api/agents/:id/execute', executionLimiter, requireOperatorAuth, async
       console.log(`[Execution] ✅ Confirmed tx: ${tx.txHash} | Block: ${tx.blockNumber}`);
 
     } catch (broadcastErr: any) {
-      // Rollback the atomic spend reservation on broadcast failure
-      try {
-        db.atomicSpendingUpdate(agent.id, -proposal.amount, agent.dailyLimit + proposal.amount);
-      } catch { /* best-effort rollback */ }
+      const capturedTxHash = broadcastErr.txHash || undefined;
+      const isAmbiguousTimeout = Boolean(broadcastErr.isReceiptTimeout);
 
-      console.error('[Execution] ❌ Broadcast failed:', broadcastErr.message);
+      // Only rollback spend if the broadcast never reached the mempool/chain
+      if (!isAmbiguousTimeout && !capturedTxHash) {
+        try {
+          db.atomicSpendingUpdate(agent.id, -proposal.amount, agent.dailyLimit + proposal.amount);
+        } catch { /* best-effort rollback */ }
+      }
+
+      console.error('[Execution] ❌ Broadcast/Receipt error:', broadcastErr.message);
 
       executionResult = {
         jobId,
@@ -580,8 +585,10 @@ app.post('/api/agents/:id/execute', executionLimiter, requireOperatorAuth, async
         proposal,
         policyResult,
         status: 'failed',
+        txHash: capturedTxHash,
+        explorerUrl: capturedTxHash ? `${config.blockExplorerUrl}/tx/${capturedTxHash}` : undefined,
         executedAt,
-        error: `Policy approved. Broadcast failed: ${broadcastErr.message}. No on-chain transaction completed.`,
+        error: `Policy approved. Broadcast/Receipt error: ${broadcastErr.message}.${isAmbiguousTimeout ? ' Transaction broadcasted; awaiting ledger reconciliation.' : ' No on-chain transaction completed.'}`,
       };
 
       db.addAuditRecord({
@@ -593,7 +600,9 @@ app.post('/api/agents/:id/execute', executionLimiter, requireOperatorAuth, async
         proposal,
         policyCheck: policyResult,
         outcome: 'failed',
-        details: `Policy APPROVED. Broadcast FAILED: ${broadcastErr.message}. Wallet balance: ${simResult.currentBalanceEth} ETH.`,
+        txHash: capturedTxHash,
+        explorerUrl: capturedTxHash ? `${config.blockExplorerUrl}/tx/${capturedTxHash}` : undefined,
+        details: `Policy APPROVED. Execution status FAILED: ${broadcastErr.message}. Wallet balance: ${simResult.currentBalanceEth} ETH.`,
       });
     }
 

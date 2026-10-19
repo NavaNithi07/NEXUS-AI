@@ -4,6 +4,8 @@ import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import { config } from '../config.js';
 import type { AuthTokenPayload } from '../middleware/auth.js';
+import { getDb } from '../db/database.js';
+import { getNeonPool, queryNeon } from '../db/neon.js';
 
 // ── Password Hashing using Scrypt (OWASP Recommended) ──────────────────────
 const SCRYPT_KEYLEN = 64;
@@ -56,7 +58,7 @@ export async function verifyPassword(password: string, storedHash: string): Prom
   });
 }
 
-// ── Account Lockout Tracking ────────────────────────────────────────────────
+// ── Account Lockout Tracking with Database Durability ───────────────────────
 interface FailedAttemptTracker {
   count: number;
   lockoutUntil: number | null;
@@ -64,6 +66,19 @@ interface FailedAttemptTracker {
 }
 
 const failedAttemptsMap = new Map<string, FailedAttemptTracker>();
+
+// Load unexpired lockouts from DB on initialization
+try {
+  const db = getDb();
+  const lockedUsers = db.prepare('SELECT email, failed_attempts, lockout_until FROM users WHERE lockout_until IS NOT NULL AND lockout_until > ?').all(Date.now()) as any[];
+  for (const u of lockedUsers) {
+    failedAttemptsMap.set(u.email.toLowerCase(), {
+      count: Number(u.failed_attempts || 0),
+      lockoutUntil: Number(u.lockout_until),
+      lastAttemptAt: Date.now(),
+    });
+  }
+} catch { /* schema initialized lazily */ }
 
 const MAX_FAILED_ATTEMPTS = 5;
 const LOCKOUT_DURATION_MS = 15 * 60 * 1000; // 15 minutes
@@ -74,7 +89,8 @@ const WINDOW_DURATION_MS = 15 * 60 * 1000;  // 15 minutes reset window
  */
 export function checkAccountLockout(identifier: string): { isLocked: boolean; remainingSeconds: number } {
   const now = Date.now();
-  const tracker = failedAttemptsMap.get(identifier.toLowerCase());
+  const key = identifier.toLowerCase();
+  const tracker = failedAttemptsMap.get(key);
 
   if (!tracker || !tracker.lockoutUntil) {
     return { isLocked: false, remainingSeconds: 0 };
@@ -85,8 +101,16 @@ export function checkAccountLockout(identifier: string): { isLocked: boolean; re
     return { isLocked: true, remainingSeconds };
   }
 
-  // Lockout expired, reset counter
-  failedAttemptsMap.delete(identifier.toLowerCase());
+  // Lockout expired, reset counter in memory and DB
+  failedAttemptsMap.delete(key);
+  try {
+    const db = getDb();
+    db.prepare('UPDATE users SET failed_attempts = 0, lockout_until = NULL WHERE email = ?').run(key);
+  } catch {}
+  if (getNeonPool()) {
+    queryNeon('UPDATE users SET failed_attempts = 0, lockout_until = NULL WHERE email = $1', [key]).catch(() => {});
+  }
+
   return { isLocked: false, remainingSeconds: 0 };
 }
 
@@ -110,6 +134,24 @@ export function recordFailedAttempt(identifier: string): { isNowLocked: boolean;
   if (tracker.count >= MAX_FAILED_ATTEMPTS) {
     tracker.lockoutUntil = now + LOCKOUT_DURATION_MS;
     failedAttemptsMap.set(key, tracker);
+
+    // Persist lockout to DB
+    try {
+      const db = getDb();
+      db.prepare(`
+        INSERT INTO users (id, email, password_hash, role, failed_attempts, lockout_until, created_at)
+        VALUES (?, ?, 'LOCKOUT_PLACEHOLDER', 'operator', ?, ?, datetime('now'))
+        ON CONFLICT (email) DO UPDATE SET failed_attempts = EXCLUDED.failed_attempts, lockout_until = EXCLUDED.lockout_until;
+      `).run(`usr-${key}`, key, tracker.count, tracker.lockoutUntil);
+    } catch {}
+    if (getNeonPool()) {
+      queryNeon(`
+        INSERT INTO users (id, email, password_hash, role, failed_attempts, lockout_until, created_at)
+        VALUES ($1, $2, 'LOCKOUT_PLACEHOLDER', 'operator', $3, $4, NOW()::text)
+        ON CONFLICT (email) DO UPDATE SET failed_attempts = EXCLUDED.failed_attempts, lockout_until = EXCLUDED.lockout_until;
+      `, [`usr-${key}`, key, tracker.count, tracker.lockoutUntil]).catch(() => {});
+    }
+
     return { isNowLocked: true, remainingAttempts: 0 };
   }
 
@@ -121,10 +163,18 @@ export function recordFailedAttempt(identifier: string): { isNowLocked: boolean;
  * Clears failed attempts upon successful authentication
  */
 export function clearFailedAttempts(identifier: string): void {
-  failedAttemptsMap.delete(identifier.toLowerCase());
+  const key = identifier.toLowerCase();
+  failedAttemptsMap.delete(key);
+  try {
+    const db = getDb();
+    db.prepare('UPDATE users SET failed_attempts = 0, lockout_until = NULL WHERE email = ?').run(key);
+  } catch {}
+  if (getNeonPool()) {
+    queryNeon('UPDATE users SET failed_attempts = 0, lockout_until = NULL WHERE email = $1', [key]).catch(() => {});
+  }
 }
 
-// ── Refresh Token Management ───────────────────────────────────────────────
+// ── Refresh Token Management with Database Durability ──────────────────────
 export interface RefreshTokenRecord {
   tokenHash: string;
   userId: string;
@@ -135,8 +185,24 @@ export interface RefreshTokenRecord {
   createdAt: number;
 }
 
-// In-memory fallback token store (synchronized to DB in persistence layer)
 const refreshTokens = new Map<string, RefreshTokenRecord>();
+
+// Pre-load unexpired active refresh tokens on startup
+try {
+  const db = getDb();
+  const rows = db.prepare('SELECT * FROM refresh_tokens WHERE expires_at > ?').all(Date.now()) as any[];
+  for (const r of rows) {
+    refreshTokens.set(r.token_hash, {
+      tokenHash: r.token_hash,
+      userId: r.user_id,
+      email: r.email,
+      role: r.role,
+      expiresAt: Number(r.expires_at),
+      revoked: Boolean(r.revoked),
+      createdAt: Number(r.created_at),
+    });
+  }
+} catch { /* schema initialized lazily */ }
 
 /**
  * Generates a cryptographically secure random refresh token (32 bytes hex)
@@ -150,7 +216,7 @@ export function generateRefreshToken(user: { userId: string; email: string; role
   const expiresInSeconds = 7 * 24 * 60 * 60; // 7 days
   const expiresAt = Date.now() + expiresInSeconds * 1000;
 
-  refreshTokens.set(tokenHash, {
+  const record: RefreshTokenRecord = {
     tokenHash,
     userId: user.userId,
     email: user.email,
@@ -158,7 +224,27 @@ export function generateRefreshToken(user: { userId: string; email: string; role
     expiresAt,
     revoked: false,
     createdAt: Date.now(),
-  });
+  };
+
+  refreshTokens.set(tokenHash, record);
+
+  // Persist to SQLite
+  try {
+    const db = getDb();
+    db.prepare(`
+      INSERT OR REPLACE INTO refresh_tokens (token_hash, user_id, email, role, expires_at, revoked, created_at)
+      VALUES (?, ?, ?, ?, ?, 0, ?)
+    `).run(tokenHash, user.userId, user.email, user.role, expiresAt, Date.now());
+  } catch {}
+
+  // Persist to Neon
+  if (getNeonPool()) {
+    queryNeon(`
+      INSERT INTO refresh_tokens (token_hash, user_id, email, role, expires_at, revoked, created_at)
+      VALUES ($1, $2, $3, $4, $5, false, $6)
+      ON CONFLICT (token_hash) DO UPDATE SET expires_at = EXCLUDED.expires_at, revoked = EXCLUDED.revoked;
+    `, [tokenHash, user.userId, user.email, user.role, expiresAt, Date.now()]).catch(() => {});
+  }
 
   return { refreshToken: rawToken, expiresInSeconds };
 }
@@ -173,7 +259,27 @@ export function rotateRefreshToken(rawToken: string): {
   error?: string;
 } {
   const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
-  const record = refreshTokens.get(tokenHash);
+  let record = refreshTokens.get(tokenHash);
+
+  // Fallback to SQLite if not in memory
+  if (!record) {
+    try {
+      const db = getDb();
+      const r = db.prepare('SELECT * FROM refresh_tokens WHERE token_hash = ?').get(tokenHash) as any;
+      if (r) {
+        record = {
+          tokenHash: r.token_hash,
+          userId: r.user_id,
+          email: r.email,
+          role: r.role,
+          expiresAt: Number(r.expires_at),
+          revoked: Boolean(r.revoked),
+          createdAt: Number(r.created_at),
+        };
+        refreshTokens.set(tokenHash, record);
+      }
+    } catch {}
+  }
 
   if (!record) {
     return { valid: false, error: 'Invalid or unrecognized refresh token.' };
@@ -186,23 +292,41 @@ export function rotateRefreshToken(rawToken: string): {
         r.revoked = true;
       }
     }
+    try {
+      const db = getDb();
+      db.prepare('UPDATE refresh_tokens SET revoked = 1 WHERE user_id = ?').run(record.userId);
+    } catch {}
+    if (getNeonPool()) {
+      queryNeon('UPDATE refresh_tokens SET revoked = true WHERE user_id = $1', [record.userId]).catch(() => {});
+    }
     return { valid: false, error: 'Refresh token was previously revoked. Suspicious token reuse detected.' };
   }
 
   if (Date.now() > record.expiresAt) {
     refreshTokens.delete(tokenHash);
+    try {
+      const db = getDb();
+      db.prepare('DELETE FROM refresh_tokens WHERE token_hash = ?').run(tokenHash);
+    } catch {}
     return { valid: false, error: 'Refresh token has expired.' };
   }
 
   // Revoke the used token (one-time use rotation)
   record.revoked = true;
+  try {
+    const db = getDb();
+    db.prepare('UPDATE refresh_tokens SET revoked = 1 WHERE token_hash = ?').run(tokenHash);
+  } catch {}
+  if (getNeonPool()) {
+    queryNeon('UPDATE refresh_tokens SET revoked = true WHERE token_hash = $1', [tokenHash]).catch(() => {});
+  }
 
   // Issue new refresh token
   const newRawToken = crypto.randomBytes(32).toString('hex');
   const newTokenHash = crypto.createHash('sha256').update(newRawToken).digest('hex');
   const expiresAt = Date.now() + 7 * 24 * 60 * 60 * 1000;
 
-  refreshTokens.set(newTokenHash, {
+  const newRecord: RefreshTokenRecord = {
     tokenHash: newTokenHash,
     userId: record.userId,
     email: record.email,
@@ -210,7 +334,25 @@ export function rotateRefreshToken(rawToken: string): {
     expiresAt,
     revoked: false,
     createdAt: Date.now(),
-  });
+  };
+
+  refreshTokens.set(newTokenHash, newRecord);
+
+  try {
+    const db = getDb();
+    db.prepare(`
+      INSERT OR REPLACE INTO refresh_tokens (token_hash, user_id, email, role, expires_at, revoked, created_at)
+      VALUES (?, ?, ?, ?, ?, 0, ?)
+    `).run(newTokenHash, record.userId, record.email, record.role, expiresAt, Date.now());
+  } catch {}
+
+  if (getNeonPool()) {
+    queryNeon(`
+      INSERT INTO refresh_tokens (token_hash, user_id, email, role, expires_at, revoked, created_at)
+      VALUES ($1, $2, $3, $4, $5, false, $6)
+      ON CONFLICT (token_hash) DO UPDATE SET expires_at = EXCLUDED.expires_at, revoked = EXCLUDED.revoked;
+    `, [newTokenHash, record.userId, record.email, record.role, expiresAt, Date.now()]).catch(() => {});
+  }
 
   return {
     valid: true,
@@ -231,7 +373,16 @@ export function revokeRefreshToken(rawToken: string): boolean {
   const record = refreshTokens.get(tokenHash);
   if (record) {
     record.revoked = true;
-    return true;
   }
-  return false;
+
+  try {
+    const db = getDb();
+    db.prepare('UPDATE refresh_tokens SET revoked = 1 WHERE token_hash = ?').run(tokenHash);
+  } catch {}
+
+  if (getNeonPool()) {
+    queryNeon('UPDATE refresh_tokens SET revoked = true WHERE token_hash = $1', [tokenHash]).catch(() => {});
+  }
+
+  return Boolean(record);
 }

@@ -26,7 +26,7 @@ export function getNeonPool(): pg.Pool | null {
     ssl: { rejectUnauthorized: false },
     max: 10,
     idleTimeoutMillis: 30000,
-    connectionTimeoutMillis: 10000,
+    connectionTimeoutMillis: 30000,
   });
 
   _neonPool.on('error', (err) => {
@@ -43,6 +43,16 @@ export async function queryNeon<T extends pg.QueryResultRow = any>(sql: string, 
   try {
     return await pool.query<T>(sql, params);
   } catch (err: any) {
+    if (err.message?.includes('timeout') || err.message?.includes('terminated')) {
+      try {
+        // Backoff and retry once to accommodate serverless wake-up latency
+        await new Promise((r) => setTimeout(r, 500));
+        return await pool.query<T>(sql, params);
+      } catch (retryErr: any) {
+        console.warn('[Neon DB] Retry after wake-up notice:', retryErr.message);
+        throw retryErr;
+      }
+    }
     console.error('[Neon Query Error]', err.message, '| SQL:', sql);
     throw err;
   }
@@ -268,8 +278,8 @@ export async function syncSqliteToNeon(): Promise<{ syncedAgents: number; synced
       `, [s.key, s.value, s.updated_at]);
     }
 
-    // 4. Sync Audit Records (last 100)
-    const audits = sqlite.prepare('SELECT * FROM audit_records ORDER BY timestamp DESC LIMIT 100').all() as any[];
+    // 4. Sync Audit Records (complete cryptographic hash chain starting from genesis)
+    const audits = sqlite.prepare('SELECT * FROM audit_records ORDER BY sequence_number ASC').all() as any[];
     for (const aud of audits) {
       await client.query(`
         INSERT INTO audit_records (id, timestamp, agent_id, agent_name, task_goal, proposal, policy_check, outcome, tx_hash, explorer_url, block_number, details, prev_hash, record_hash, sequence_number)

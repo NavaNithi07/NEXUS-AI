@@ -224,16 +224,36 @@ export async function sendNativeToken(
 
   console.log(`[Blockchain] Broadcasted with hash: ${txHash}. Awaiting receipt...`);
 
-  // Wait for 1 confirmation
-  const receipt = await publicClient.waitForTransactionReceipt({
-    hash: txHash,
-    confirmations: 1,
-    timeout: 30000,
-  });
+  // Wait for 1 confirmation with fail-safe error attribution
+  let receipt;
+  try {
+    receipt = await publicClient.waitForTransactionReceipt({
+      hash: txHash,
+      confirmations: 1,
+      timeout: 30000,
+    });
+  } catch (receiptErr: any) {
+    const errorWithHash = new Error(
+      `Transaction submitted with hash ${txHash}, but receipt confirmation timed out or failed: ${receiptErr.message}`
+    );
+    (errorWithHash as any).txHash = txHash;
+    (errorWithHash as any).isReceiptTimeout = true;
+    throw errorWithHash;
+  }
+
+  // Strict status verification: on-chain execution MUST have status === 'success'
+  if (receipt.status !== 'success') {
+    const revertError = new Error(
+      `Transaction execution REVERTED on-chain. Status: ${receipt.status}, hash: ${txHash}, block: ${receipt.blockNumber}`
+    );
+    (revertError as any).txHash = txHash;
+    (revertError as any).receipt = receipt;
+    throw revertError;
+  }
 
   const blockNumber = Number(receipt.blockNumber);
   const gasUsed = receipt.gasUsed.toString();
-  const effectiveGasPrice = receipt.effectiveGasPrice.toString();
+  const effectiveGasPrice = receipt.effectiveGasPrice ? receipt.effectiveGasPrice.toString() : '0';
   const explorerUrl = `${currentChain.blockExplorers.default.url}/tx/${txHash}`;
 
   console.log(`[Blockchain] Confirmed in block #${blockNumber}. Gas used: ${gasUsed}`);

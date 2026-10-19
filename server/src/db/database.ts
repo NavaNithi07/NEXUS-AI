@@ -20,6 +20,26 @@ export function getDb(): Database.Database {
 
 function initializeSchema(db: Database.Database): void {
   db.exec(`
+    CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      email TEXT UNIQUE NOT NULL,
+      password_hash TEXT NOT NULL,
+      role TEXT NOT NULL DEFAULT 'operator',
+      failed_attempts INTEGER DEFAULT 0,
+      lockout_until INTEGER,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS refresh_tokens (
+      token_hash TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      email TEXT NOT NULL,
+      role TEXT NOT NULL,
+      expires_at INTEGER NOT NULL,
+      revoked INTEGER DEFAULT 0,
+      created_at INTEGER NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS agents (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,

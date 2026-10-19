@@ -49,12 +49,23 @@ export function verifyAuditChainIntegrity(records: ChainedAuditRecord[]): {
   // Sort ascending by sequence number / timestamp
   const ordered = [...records].sort((a, b) => a.sequenceNumber - b.sequenceNumber);
 
-  let expectedPrevHash = GENESIS_HASH;
+  // If genesis sequence 1 is present, it must start with GENESIS_HASH
+  if (ordered[0].sequenceNumber === 1 && ordered[0].prevHash !== GENESIS_HASH) {
+    return {
+      isValid: false,
+      totalRecords: ordered.length,
+      headHash: null,
+      corruptedRecordId: ordered[0].id,
+      error: `Genesis block (seq 1) must anchor to GENESIS_HASH, found ${ordered[0].prevHash.substring(0, 12)}...`,
+    };
+  }
+
+  let expectedPrevHash = ordered[0].prevHash;
 
   for (let i = 0; i < ordered.length; i++) {
     const record = ordered[i];
 
-    // 1. Verify previous hash pointer
+    // 1. Verify previous hash pointer continuity
     if (record.prevHash !== expectedPrevHash) {
       return {
         isValid: false,
