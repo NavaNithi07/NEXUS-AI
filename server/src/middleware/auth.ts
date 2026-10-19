@@ -1,5 +1,5 @@
 // server/src/middleware/auth.ts
-// JWT Authentication & Role-Based Access Control Middleware
+// JWT Authentication, RBAC, Customer Isolation & Resource Ownership
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { config } from '../config.js';
@@ -24,7 +24,10 @@ declare global {
 /**
  * Signs a new JWT access token with user identity, role, and expiration
  */
-export function signAccessToken(payload: Omit<AuthTokenPayload, 'iat' | 'exp'>, expiresIn?: string): string {
+export function signAccessToken(
+  payload: Omit<AuthTokenPayload, 'iat' | 'exp'>,
+  expiresIn?: string
+): string {
   return jwt.sign(payload, config.jwtSecret, {
     expiresIn: (expiresIn || config.jwtExpiresIn) as any,
     algorithm: 'HS256',
@@ -82,7 +85,7 @@ export function requireAuth(allowedRoles?: ('operator' | 'admin' | 'viewer')[]) 
         res.status(401).json({
           error: 'Unauthorized',
           code: 'TOKEN_EXPIRED',
-          message: 'Authentication token has expired. Please log in again.',
+          message: 'Authentication token has expired. Please refresh your session.',
         });
         return;
       }
@@ -93,6 +96,35 @@ export function requireAuth(allowedRoles?: ('operator' | 'admin' | 'viewer')[]) 
       });
       return;
     }
+  };
+}
+
+/**
+ * Resource ownership verification to enforce tenant and customer isolation.
+ * Prevents horizontal privilege escalation where one user modifies another's resources.
+ */
+export function verifyOwnership(getResourceOwnerId: (req: Request) => string | undefined | null) {
+  return (req: Request, res: Response, next: NextFunction): void => {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized', message: 'Authentication required' });
+      return;
+    }
+
+    // Admins and operators can operate across resources if within vault permissions
+    if (req.user.role === 'admin' || req.user.role === 'operator') {
+      return next();
+    }
+
+    const ownerId = getResourceOwnerId(req);
+    if (ownerId && ownerId !== req.user.userId) {
+      res.status(403).json({
+        error: 'Forbidden',
+        message: 'Access denied: You do not have permission to access or modify this resource.',
+      });
+      return;
+    }
+
+    next();
   };
 }
 

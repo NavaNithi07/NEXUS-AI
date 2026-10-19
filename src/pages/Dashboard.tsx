@@ -84,14 +84,14 @@ export const Dashboard: React.FC = () => {
           <div className="flex items-center gap-2">
             <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-pulse" />
             <span className="text-xs font-mono font-medium tracking-wider text-cyan-400 uppercase">
-              Autonomous Liquidity Protocol
+              Autonomous Liquidity Protocol • Base Sepolia Testnet Enclave
             </span>
           </div>
           <h2 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
             NEXUS AI WALLET
           </h2>
           <p className="text-sm text-slate-400 max-w-xl">
-            Autonomous on-chain agent execution orchestrator. Continuous algorithmic arbitrage, yield optimization, and multi-sig vault defense.
+            Autonomous on-chain agent execution orchestrator with server-enforced spending policies and circuit breaker defense. All balances and transactions on Base Sepolia carry zero fiat value.
           </p>
         </div>
 
@@ -296,7 +296,7 @@ export const Dashboard: React.FC = () => {
                 Yield Generated
               </span>
             </div>
-            <span className="font-mono text-cyan-400">Avg APY: {agents.length > 0 ? '+14.8%' : '0.0%'}</span>
+            <span className="font-mono text-cyan-400">Yield: {agents.length > 0 ? '0.00% (Base Sepolia Testnet)' : '0.0%'}</span>
           </div>
         </div>
 

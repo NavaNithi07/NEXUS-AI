@@ -24,6 +24,8 @@ const PRIVATE_RELAYS = [
   { name: 'BloXroute MaxProfit', endpoint: 'https://virginia.bdn.bloxroute.com', latency: '26ms', status: 'standby', deflections: 0 },
 ];
 
+import { api } from '../lib/apiClient';
+
 export const Security: React.FC = () => {
   const [
     isGlobalEmergencyHalted,
@@ -51,7 +53,35 @@ export const Security: React.FC = () => {
 
   const [confirmHaltOpen, setConfirmHaltOpen] = useState(false);
   const [haltLoading, setHaltLoading] = useState(false);
+  const [auditVerifyLoading, setAuditVerifyLoading] = useState(false);
+  const [auditVerifyResult, setAuditVerifyResult] = useState<any>(null);
+  const [reconcileLoading, setReconcileLoading] = useState(false);
+  const [reconcileResult, setReconcileResult] = useState<any>(null);
   const threatLogsCount = activityLogs.filter((l) => l.severity === 'warning' || l.severity === 'critical').length;
+
+  const handleVerifyAuditChain = async () => {
+    setAuditVerifyLoading(true);
+    try {
+      const res = await api.auditLogs.verify();
+      setAuditVerifyResult(res);
+    } catch (err: any) {
+      alert(`Audit verification request failed: ${err.message}`);
+    } finally {
+      setAuditVerifyLoading(false);
+    }
+  };
+
+  const handleRunReconciliation = async () => {
+    setReconcileLoading(true);
+    try {
+      const res = await api.reconciliation.run();
+      setReconcileResult(res);
+    } catch (err: any) {
+      alert(`Reconciliation request failed: ${err.message}`);
+    } finally {
+      setReconcileLoading(false);
+    }
+  };
 
   useEffect(() => {
     fetchOnChainStatus();
@@ -157,6 +187,119 @@ export const Security: React.FC = () => {
           icon={Lock}
           accent="cyan"
         />
+      </div>
+
+      {/* Bank-Grade Verification & Reconciliation Grid */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Card 1: Cryptographic Audit Trail Hash Chain */}
+        <div className="rounded-3xl bg-slate-900/80 border border-slate-800 p-6 shadow-xl flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 flex items-center justify-center font-bold">
+                  <ShieldCheck className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white">Cryptographic Audit Hash Chain</h3>
+                  <p className="text-xs text-slate-400">SHA-256 Merkle-linked tamper-evident financial ledger</p>
+                </div>
+              </div>
+              <span className={`px-2.5 py-1 rounded-full text-xs font-mono font-bold border ${
+                auditVerifyResult?.isValid
+                  ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                  : 'bg-slate-800 text-slate-400 border-slate-700'
+              }`}>
+                {auditVerifyResult ? (auditVerifyResult.isValid ? 'CHAIN VERIFIED' : 'TAMPER DETECTED') : 'READY TO AUDIT'}
+              </span>
+            </div>
+
+            <p className="text-xs text-slate-300 leading-relaxed mb-4">
+              Every sensitive financial event, proposal, policy decision, and killswitch action is chained with the previous block hash. Any post-hoc database tampering invalidates the chain.
+            </p>
+
+            {auditVerifyResult && (
+              <div className="p-3.5 rounded-2xl bg-slate-950 border border-slate-800 space-y-1.5 text-xs font-mono mb-4">
+                <div className="flex justify-between text-slate-400">
+                  <span>Audited Blocks:</span>
+                  <span className="text-white font-bold">{auditVerifyResult.totalRecords}</span>
+                </div>
+                <div className="flex justify-between text-slate-400">
+                  <span>Chain Genesis:</span>
+                  <span className="text-cyan-400">000000000000...</span>
+                </div>
+                <div className="flex justify-between text-slate-400 truncate">
+                  <span>Head Digest:</span>
+                  <span className="text-emerald-400 truncate max-w-[200px]">{auditVerifyResult.headHash || 'N/A'}</span>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <button
+            onClick={handleVerifyAuditChain}
+            disabled={auditVerifyLoading}
+            className="w-full py-2.5 px-4 rounded-xl font-bold text-xs bg-cyan-500 hover:bg-cyan-400 text-slate-950 transition-all flex items-center justify-center gap-2 active:scale-95 disabled:opacity-50"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${auditVerifyLoading ? 'animate-spin' : ''}`} />
+            <span>{auditVerifyLoading ? 'Auditing SHA-256 Hash Chain...' : 'Verify Audit Trail Integrity'}</span>
+          </button>
+        </div>
+
+        {/* Card 2: Blockchain Ledger Reconciliation */}
+        <div className="rounded-3xl bg-slate-900/80 border border-slate-800 p-6 shadow-xl flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-violet-500/10 border border-violet-500/20 text-violet-400 flex items-center justify-center font-bold">
+                  <Activity className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white">Blockchain Ledger Reconciliation</h3>
+                  <p className="text-xs text-slate-400">Real-time cross-audit against Base Sepolia RPC receipts</p>
+                </div>
+              </div>
+              <span className={`px-2.5 py-1 rounded-full text-xs font-mono font-bold border ${
+                reconcileResult?.mismatchCount === 0
+                  ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                  : 'bg-slate-800 text-slate-400 border-slate-700'
+              }`}>
+                {reconcileResult ? `${reconcileResult.matchedCount} MATCHED` : 'IDLE'}
+              </span>
+            </div>
+
+            <p className="text-xs text-slate-300 leading-relaxed mb-4">
+              Cross-references internal database execution states with authoritative on-chain receipts, verifying block numbers, gas usage, and execution status.
+            </p>
+
+            {reconcileResult && (
+              <div className="p-3.5 rounded-2xl bg-slate-950 border border-slate-800 space-y-1.5 text-xs font-mono mb-4">
+                <div className="flex justify-between text-slate-400">
+                  <span>Transactions Audited:</span>
+                  <span className="text-white font-bold">{reconcileResult.totalAudited}</span>
+                </div>
+                <div className="flex justify-between text-slate-400">
+                  <span>Mismatches Detected:</span>
+                  <span className={reconcileResult.mismatchCount > 0 ? 'text-rose-400 font-bold' : 'text-emerald-400'}>
+                    {reconcileResult.mismatchCount}
+                  </span>
+                </div>
+                <div className="flex justify-between text-slate-400">
+                  <span>Mempool / In-Flight:</span>
+                  <span className="text-cyan-400">{reconcileResult.unconfirmedCount}</span>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <button
+            onClick={handleRunReconciliation}
+            disabled={reconcileLoading}
+            className="w-full py-2.5 px-4 rounded-xl font-bold text-xs bg-slate-800 hover:bg-slate-750 text-cyan-300 border border-cyan-500/30 transition-all flex items-center justify-center gap-2 active:scale-95 disabled:opacity-50"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${reconcileLoading ? 'animate-spin' : ''}`} />
+            <span>{reconcileLoading ? 'Auditing Against Blockchain Receipts...' : 'Run On-Chain Reconciliation'}</span>
+          </button>
+        </div>
       </div>
 
       {/* Threat Radar & Private RPC Relays */}

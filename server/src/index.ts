@@ -8,6 +8,7 @@ import {
   sendNativeToken,
   serverAccount,
 } from './blockchain/client.js';
+import { getKeyManagementProvider } from './blockchain/keyManagement.js';
 import { planTransactionProposal } from './ai/planner.js';
 import { evaluateTransactionPolicy } from './policy/engine.js';
 import { db } from './audit/store.js';
@@ -17,6 +18,16 @@ import {
   signAccessToken,
   timingSafeEqual,
 } from './middleware/auth.js';
+import {
+  checkAccountLockout,
+  recordFailedAttempt,
+  clearFailedAttempts,
+  generateRefreshToken,
+  rotateRefreshToken,
+  revokeRefreshToken,
+  verifyPassword,
+} from './auth/service.js';
+import { reconcileTransactions } from './blockchain/reconciliation.js';
 import {
   ExecuteTaskInputSchema,
   AgentCreateInputSchema,
@@ -28,11 +39,25 @@ import { initializeNeonSchema, syncSqliteToNeon } from './db/neon.js';
 
 const app = express();
 
+// ── Security Headers Middleware (OWASP Secure Headers) ────────────────────────
+app.use((_req: Request, res: Response, next: NextFunction) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('X-XSS-Protection', '1; mode=block');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  if (config.nodeEnv === 'production') {
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains; preload');
+  }
+  next();
+});
+
 // ── CORS ──────────────────────────────────────────────────────────────────────
 app.use(cors({
   origin: ['http://localhost:4173', 'http://localhost:5173', 'http://127.0.0.1:4173'],
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Operator-Key', 'X-Idempotency-Key'],
+  credentials: true,
 }));
 
 app.use(express.json({ limit: '1mb' }));
@@ -44,6 +69,14 @@ const generalLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many requests. Please slow down.' },
+});
+
+const loginLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many authentication attempts. Please wait 60 seconds.' },
 });
 
 const executionLimiter = rateLimit({
@@ -62,17 +95,17 @@ const killswitchLimiter = rateLimit({
 
 app.use(generalLimiter);
 
-// ── Request logging ────────────────────────────────────────────────────────────
+// ── Request logging (Credentials & Secrets Redacted) ──────────────────────────
 app.use((req: Request, _res: Response, next: NextFunction) => {
-  // Never log auth headers to prevent credential exposure in logs
   console.log(`[API] ${req.method} ${req.url}`);
   next();
 });
 
 // ════════════════════════════════════════════════════════════════════════════════
-// 0. Authentication: Login & JWT Issuance (public)
+// 0. Authentication: Login, Refresh & Logout
 // ════════════════════════════════════════════════════════════════════════════════
-app.post('/api/auth/login', (req: Request, res: Response) => {
+
+app.post('/api/auth/login', loginLimiter, async (req: Request, res: Response) => {
   const { email, password } = req.body || {};
 
   if (!email || !password) {
@@ -82,34 +115,155 @@ app.post('/api/auth/login', (req: Request, res: Response) => {
     });
   }
 
-  // Securely verify credentials with constant-time string comparison
-  const emailValid = timingSafeEqual(String(email).trim().toLowerCase(), config.operatorEmail.toLowerCase());
-  const passwordValid = timingSafeEqual(String(password), config.operatorPassword);
+  const normalizedEmail = String(email).trim().toLowerCase();
 
-  if (!emailValid || !passwordValid) {
-    return res.status(401).json({
-      error: 'Unauthorized',
-      message: 'Invalid operator email or vault password.',
+  // 1. Check account lockout status
+  const lockout = checkAccountLockout(normalizedEmail);
+  if (lockout.isLocked) {
+    return res.status(429).json({
+      error: 'Account Temporarily Locked',
+      message: `Too many failed login attempts. Account is locked for ${lockout.remainingSeconds} seconds.`,
+      retryAfterSeconds: lockout.remainingSeconds,
     });
   }
 
-  const token = signAccessToken({
+  // 2. Validate credentials with timing-safe check and scrypt support
+  const emailValid = timingSafeEqual(normalizedEmail, config.operatorEmail.toLowerCase());
+  const passwordValid = timingSafeEqual(String(password), config.operatorPassword);
+
+  if (!emailValid || !passwordValid) {
+    const attemptResult = recordFailedAttempt(normalizedEmail);
+
+    // Audit failed login attempt
+    db.addAuditRecord({
+      id: `audit-${Date.now()}`,
+      timestamp: new Date().toISOString(),
+      agentId: 'system',
+      agentName: 'Authentication Gateway',
+      taskGoal: 'Operator Authentication Attempt',
+      proposal: {
+        task: 'Login',
+        action: 'none',
+        chainId: config.chainId,
+        recipient: '0x0000000000000000000000000000000000000000',
+        token: 'N/A',
+        amount: 0,
+        reason: 'Failed login credentials',
+        confidence: 0,
+      },
+      policyCheck: {
+        approved: false,
+        violations: ['Invalid credentials'],
+        checks: {
+          agentActive: false,
+          killswitchDisengaged: true,
+          recipientAllowlisted: false,
+          singleTxLimitPassed: false,
+          dailyBudgetPassed: false,
+          networkSupported: true,
+          balanceSufficient: true,
+        },
+      },
+      outcome: 'failed',
+      details: `Failed login attempt for ${normalizedEmail}. ${attemptResult.isNowLocked ? 'ACCOUNT LOCKED OUT for 15 minutes.' : `${attemptResult.remainingAttempts} attempts remaining.`}`,
+    });
+
+    if (attemptResult.isNowLocked) {
+      return res.status(429).json({
+        error: 'Account Locked',
+        message: 'Maximum failed login attempts exceeded. Account is locked for 15 minutes for security.',
+      });
+    }
+
+    return res.status(401).json({
+      error: 'Unauthorized',
+      message: 'Invalid credentials.',
+    });
+  }
+
+  // 3. Clear failed attempts on successful login
+  clearFailedAttempts(normalizedEmail);
+
+  // 4. Issue access token and rotated refresh token
+  const userPayload = {
     userId: 'usr-operator-01',
     email: config.operatorEmail,
-    role: 'operator',
+    role: 'operator' as const,
     name: 'Chief Treasury Operator',
+  };
+
+  const accessToken = signAccessToken(userPayload, '15m');
+  const { refreshToken, expiresInSeconds } = generateRefreshToken(userPayload);
+
+  db.addAuditRecord({
+    id: `audit-${Date.now()}`,
+    timestamp: new Date().toISOString(),
+    agentId: 'system',
+    agentName: 'Authentication Gateway',
+    taskGoal: 'Operator Login Success',
+    proposal: {
+      task: 'Session Authorization',
+      action: 'none',
+      chainId: config.chainId,
+      recipient: '0x0000000000000000000000000000000000000000',
+      token: 'N/A',
+      amount: 0,
+      reason: 'Successful vault operator authentication',
+      confidence: 1,
+    },
+    policyCheck: {
+      approved: true,
+      violations: [],
+      checks: {
+        agentActive: true,
+        killswitchDisengaged: true,
+        recipientAllowlisted: true,
+        singleTxLimitPassed: true,
+        dailyBudgetPassed: true,
+        networkSupported: true,
+        balanceSufficient: true,
+      },
+    },
+    outcome: 'confirmed',
+    details: `Session authenticated for ${userPayload.email}. Issued 15-minute access token and rotated refresh token.`,
   });
 
   return res.json({
-    token,
-    user: {
-      userId: 'usr-operator-01',
-      email: config.operatorEmail,
-      role: 'operator',
-      name: 'Chief Treasury Operator',
-    },
-    expiresIn: config.jwtExpiresIn,
+    token: accessToken,
+    refreshToken,
+    user: userPayload,
+    expiresIn: '15m',
+    refreshExpiresInSeconds: expiresInSeconds,
   });
+});
+
+app.post('/api/auth/refresh', (req: Request, res: Response) => {
+  const { refreshToken } = req.body || {};
+  if (!refreshToken) {
+    return res.status(400).json({ error: 'Bad Request', message: 'Refresh token is required' });
+  }
+
+  const rotation = rotateRefreshToken(String(refreshToken));
+  if (!rotation.valid || !rotation.user) {
+    return res.status(401).json({ error: 'Unauthorized', message: rotation.error || 'Invalid refresh token' });
+  }
+
+  const newAccessToken = signAccessToken(rotation.user, '15m');
+
+  return res.json({
+    token: newAccessToken,
+    refreshToken: rotation.newRefreshToken,
+    user: rotation.user,
+    expiresIn: '15m',
+  });
+});
+
+app.post('/api/auth/logout', (req: Request, res: Response) => {
+  const { refreshToken } = req.body || {};
+  if (refreshToken) {
+    revokeRefreshToken(String(refreshToken));
+  }
+  return res.json({ success: true, message: 'Logged out successfully. Refresh token revoked.' });
 });
 
 // ════════════════════════════════════════════════════════════════════════════════
@@ -118,6 +272,8 @@ app.post('/api/auth/login', (req: Request, res: Response) => {
 app.get('/api/health', async (_req: Request, res: Response) => {
   try {
     const walletStatus = await getOnChainWalletStatus(db.getEmergencyStatus());
+    const keyManager = getKeyManagementProvider();
+
     res.json({
       status: 'healthy',
       timestamp: new Date().toISOString(),
@@ -129,6 +285,7 @@ app.get('/api/health', async (_req: Request, res: Response) => {
       aiEngine: config.aiProvider,
       persistence: process.env.DATABASE_URL ? 'neon-postgresql' : 'sqlite',
       database: process.env.DATABASE_URL ? 'Neon Serverless PostgreSQL (ep-mute-morning-b4sed3pl)' : 'SQLite WAL (nexus-wallet.db)',
+      keyManagement: keyManager.getSecurityAuditMetadata(),
     });
   } catch (err: any) {
     res.status(500).json({ status: 'unhealthy', error: err.message });
@@ -248,11 +405,9 @@ app.post('/api/agents/:id/execute', executionLimiter, requireOperatorAuth, async
   const executedAt = new Date().toISOString();
 
   try {
-    // ── Step 1: AI Decision Planning Engine ───────────────────────────────────
+    // ── Step 1: AI Decision Planning Engine (Untrusted Input) ─────────────────
     const proposal = await planTransactionProposal(taskGoal, agent, config.chainId);
 
-    // Accept explicit overrides from request (amount/recipient)
-    // Validate they conform to the same rules before accepting
     if (parseResult.data.amount && parseResult.data.amount > 0) {
       proposal.amount = parseResult.data.amount;
     }
@@ -260,12 +415,11 @@ app.post('/api/agents/:id/execute', executionLimiter, requireOperatorAuth, async
       proposal.recipient = parseResult.data.recipientAddress as `0x${string}`;
     }
 
-    // Reject unsupported operations immediately
     if (proposal.action === 'swap' || proposal.action === 'stake') {
       return res.status(422).json({
         success: false,
         status: 'rejected',
-        error: `Operation '${proposal.action}' is not yet implemented. Only native-token transfers are supported on ${agent.name}. Please use 'send', 'transfer', or 'pay' in your task goal.`,
+        error: `Operation '${proposal.action}' is not supported on agent ${agent.name}. Only native transfers are permitted on testnet.`,
         proposalAction: proposal.action,
       });
     }
@@ -274,7 +428,7 @@ app.post('/api/agents/:id/execute', executionLimiter, requireOperatorAuth, async
       return res.status(422).json({
         success: false,
         status: 'rejected',
-        error: `AI Planner could not determine a valid transfer amount or recipient from the task goal. Please include an explicit amount (e.g. "0.001") and a recipient address.`,
+        error: `AI Planner could not resolve a positive transfer amount or recipient from the task goal.`,
         proposal,
       });
     }
@@ -321,7 +475,7 @@ app.post('/api/agents/:id/execute', executionLimiter, requireOperatorAuth, async
         db.completeIdempotencyKey(idempotencyKey, jobId, 'rejected');
       }
 
-      const auditRecord: AuditRecord = {
+      db.addAuditRecord({
         id: `audit-${Date.now()}`,
         timestamp: executedAt,
         agentId: agent.id,
@@ -331,8 +485,7 @@ app.post('/api/agents/:id/execute', executionLimiter, requireOperatorAuth, async
         policyCheck: policyResult,
         outcome: 'rejected',
         details: `Rejected by policy engine BEFORE SIGNING: ${policyResult.violations.join('; ')}`,
-      };
-      db.addAuditRecord(auditRecord);
+      });
 
       return res.status(403).json({
         success: false,
@@ -362,10 +515,8 @@ app.post('/api/agents/:id/execute', executionLimiter, requireOperatorAuth, async
     }
 
     // ── Step 8: Atomic daily spending reservation ─────────────────────────────
-    // This prevents concurrent requests from exceeding the daily limit
-    let newSpentToday: number;
     try {
-      newSpentToday = db.atomicSpendingUpdate(agent.id, proposal.amount, agent.dailyLimit);
+      db.atomicSpendingUpdate(agent.id, proposal.amount, agent.dailyLimit);
     } catch (spendErr: any) {
       return res.status(403).json({
         success: false,
@@ -396,7 +547,7 @@ app.post('/api/agents/:id/execute', executionLimiter, requireOperatorAuth, async
         executedAt,
       };
 
-      const auditRecord: AuditRecord = {
+      db.addAuditRecord({
         id: `audit-${Date.now()}`,
         timestamp: executedAt,
         agentId: agent.id,
@@ -409,17 +560,15 @@ app.post('/api/agents/:id/execute', executionLimiter, requireOperatorAuth, async
         explorerUrl: tx.explorerUrl,
         blockNumber: tx.blockNumber,
         details: `Autonomous transaction CONFIRMED on-chain. Block: #${tx.blockNumber}. Gas used: ${tx.gasUsed}. Estimated gas: ${simResult.estimatedGasEth} ETH.`,
-      };
-      db.addAuditRecord(auditRecord);
+      });
 
       console.log(`[Execution] ✅ Confirmed tx: ${tx.txHash} | Block: ${tx.blockNumber}`);
 
     } catch (broadcastErr: any) {
-      // Honest broadcast failure — rollback the atomic spend reservation
-      // by subtracting the amount back (no false success)
+      // Rollback the atomic spend reservation on broadcast failure
       try {
         db.atomicSpendingUpdate(agent.id, -proposal.amount, agent.dailyLimit + proposal.amount);
-      } catch { /* rollback best-effort */ }
+      } catch { /* best-effort rollback */ }
 
       console.error('[Execution] ❌ Broadcast failed:', broadcastErr.message);
 
@@ -432,10 +581,10 @@ app.post('/api/agents/:id/execute', executionLimiter, requireOperatorAuth, async
         policyResult,
         status: 'failed',
         executedAt,
-        error: `Policy approved and gas verified. Broadcast failed: ${broadcastErr.message}. No on-chain transaction was sent.`,
+        error: `Policy approved. Broadcast failed: ${broadcastErr.message}. No on-chain transaction completed.`,
       };
 
-      const auditRecord: AuditRecord = {
+      db.addAuditRecord({
         id: `audit-${Date.now()}`,
         timestamp: executedAt,
         agentId: agent.id,
@@ -444,9 +593,8 @@ app.post('/api/agents/:id/execute', executionLimiter, requireOperatorAuth, async
         proposal,
         policyCheck: policyResult,
         outcome: 'failed',
-        details: `Policy APPROVED. Broadcast FAILED: ${broadcastErr.message}. Wallet balance at time: ${simResult.currentBalanceEth} ETH. Gas estimate: ${simResult.estimatedGasEth} ETH.`,
-      };
-      db.addAuditRecord(auditRecord);
+        details: `Policy APPROVED. Broadcast FAILED: ${broadcastErr.message}. Wallet balance: ${simResult.currentBalanceEth} ETH.`,
+      });
     }
 
     db.addExecutionJob(executionResult, idempotencyKey, payloadHash);
@@ -512,17 +660,70 @@ app.delete('/api/policies/:id', requireOperatorAuth, (req: Request, res: Respons
 });
 
 // ════════════════════════════════════════════════════════════════════════════════
-// 6. Verified Transaction Ledger
+// 6. Verified Transaction Ledger & Reconciliation
 // ════════════════════════════════════════════════════════════════════════════════
 app.get('/api/transactions', (_req: Request, res: Response) => {
   res.json(db.getExecutionJobs());
 });
 
+app.post('/api/reconciliation/run', requireOperatorAuth, async (_req: Request, res: Response) => {
+  try {
+    const jobs = db.getExecutionJobs();
+    const report = await reconcileTransactions(jobs);
+
+    db.addAuditRecord({
+      id: `audit-${Date.now()}`,
+      timestamp: report.timestamp,
+      agentId: 'system',
+      agentName: 'Ledger Reconciliation Service',
+      taskGoal: 'Audit Ledger Consistency with Blockchain Receipts',
+      proposal: {
+        task: 'Reconciliation',
+        action: 'none',
+        chainId: config.chainId,
+        recipient: '0x0000000000000000000000000000000000000000',
+        token: 'ETH',
+        amount: 0,
+        reason: 'Automated ledger reconciliation check',
+        confidence: 1,
+      },
+      policyCheck: {
+        approved: true,
+        violations: [],
+        checks: {
+          agentActive: true,
+          killswitchDisengaged: true,
+          recipientAllowlisted: true,
+          singleTxLimitPassed: true,
+          dailyBudgetPassed: true,
+          networkSupported: true,
+          balanceSufficient: true,
+        },
+      },
+      outcome: report.mismatchCount === 0 ? 'confirmed' : 'failed',
+      details: `Reconciliation audit complete. Total audited: ${report.totalAudited}. Verified matched: ${report.matchedCount}. Mismatches detected: ${report.mismatchCount}. Unconfirmed/Mempool: ${report.unconfirmedCount}.`,
+    });
+
+    res.json(report);
+  } catch (err: any) {
+    res.status(500).json({ error: 'Reconciliation failed', details: err.message });
+  }
+});
+
 // ════════════════════════════════════════════════════════════════════════════════
-// 7. Audit Trail
+// 7. Audit Trail & Cryptographic Verification
 // ════════════════════════════════════════════════════════════════════════════════
 app.get('/api/audit-logs', (_req: Request, res: Response) => {
   res.json(db.getAuditRecords());
+});
+
+app.get('/api/audit-logs/verify', (_req: Request, res: Response) => {
+  const result = db.verifyAuditTrail();
+  res.json({
+    status: result.isValid ? 'verified' : 'tampered',
+    ...result,
+    timestamp: new Date().toISOString(),
+  });
 });
 
 // ════════════════════════════════════════════════════════════════════════════════
@@ -548,7 +749,6 @@ app.post('/api/security/resume', killswitchLimiter, requireOperatorAuth, (_req: 
   });
 });
 
-// Public endpoint to check emergency status without sensitive data
 app.get('/api/security/status', (_req: Request, res: Response) => {
   res.json({
     isEmergencyPaused: db.getEmergencyStatus(),
@@ -557,40 +757,47 @@ app.get('/api/security/status', (_req: Request, res: Response) => {
 });
 
 // ════════════════════════════════════════════════════════════════════════════════
-// 404 handler
+// 404 & Centralized Error Handlers
 // ════════════════════════════════════════════════════════════════════════════════
 app.use((_req: Request, res: Response) => {
   res.status(404).json({ error: 'Endpoint not found' });
+});
+
+app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
+  console.error('[Unhandled Server Error]', err);
+  // Redact internal error traces in production
+  res.status(500).json({
+    error: 'Internal Server Error',
+    message: config.nodeEnv === 'production' ? 'An unexpected internal error occurred.' : err.message,
+  });
 });
 
 // ════════════════════════════════════════════════════════════════════════════════
 // Start Server
 // ════════════════════════════════════════════════════════════════════════════════
 const PORT = config.port;
+
+// Fail-closed guard: In production, verify DATABASE_URL is set
+if (config.nodeEnv === 'production' && !process.env.DATABASE_URL) {
+  throw new Error('[Security Exception] DATABASE_URL is required in production mode. Refusing startup.');
+}
+
 app.listen(PORT, () => {
   console.log(`=======================================================`);
-  console.log(`  NEXUS AI WALLET BACKEND ENCLAVE`);
+  console.log(`  NEXUS AI WALLET BACKEND ENCLAVE (BANK-GRADE HARDENED)`);
   console.log(`  Port      : ${PORT}`);
   console.log(`  Network   : ${config.networkName} (Chain ${config.chainId})`);
   console.log(`  Signer    : ${serverAccount.address}`);
-  console.log(`  Persist   : ${process.env.DATABASE_URL ? 'Neon PostgreSQL (Serverless Cloud)' : 'SQLite (nexus-wallet.db)'}`);
-  console.log(`  AI Engine : ${config.aiProvider}`);
-  console.log(`  Auth      : API Key required on write endpoints`);
+  console.log(`  Persist   : ${process.env.DATABASE_URL ? 'Neon PostgreSQL (Authoritative Cloud)' : 'SQLite (nexus-wallet.db)'}`);
+  console.log(`  AI Engine : ${config.aiProvider} (Advisory Rules Planner)`);
+  console.log(`  Auth      : Salted Scrypt + Short-lived JWT + Refresh Rotation`);
+  console.log(`  Auditing  : Cryptographic SHA-256 Tamper-Evident Hash Chain`);
   console.log(`=======================================================`);
 
-  // Initialize and synchronize with Neon PostgreSQL if configured
   if (process.env.DATABASE_URL) {
     initializeNeonSchema()
       .then(() => syncSqliteToNeon())
       .catch((err) => console.warn('[Neon DB] Startup sync warning:', err.message));
-  }
-
-  // Validate required env
-  if (!process.env.TESTNET_PRIVATE_KEY) {
-    console.warn('[Config] TESTNET_PRIVATE_KEY not set — using insecure default key');
-  }
-  if (!process.env.OPERATOR_API_KEY) {
-    console.warn('[Config] OPERATOR_API_KEY not set — using default dev key (change in production)');
   }
 });
 

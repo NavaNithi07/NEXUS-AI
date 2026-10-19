@@ -91,7 +91,10 @@ function initializeSchema(db: Database.Database): void {
       tx_hash TEXT,
       explorer_url TEXT,
       block_number INTEGER,
-      details TEXT
+      details TEXT,
+      prev_hash TEXT DEFAULT '0000000000000000000000000000000000000000000000000000000000000000',
+      record_hash TEXT,
+      sequence_number INTEGER DEFAULT 1
     );
 
     CREATE TABLE IF NOT EXISTS system_state (
@@ -147,6 +150,19 @@ function initializeSchema(db: Database.Database): void {
     const pragmaJobs = db.pragma('table_info(execution_jobs)') as any[];
     if (pragmaJobs && !pragmaJobs.some((col: any) => col.name === 'payload_hash')) {
       db.exec('ALTER TABLE execution_jobs ADD COLUMN payload_hash TEXT;');
+    }
+
+    const pragmaAudits = db.pragma('table_info(audit_records)') as any[];
+    if (pragmaAudits) {
+      if (!pragmaAudits.some((col: any) => col.name === 'prev_hash')) {
+        db.exec("ALTER TABLE audit_records ADD COLUMN prev_hash TEXT DEFAULT '0000000000000000000000000000000000000000000000000000000000000000';");
+      }
+      if (!pragmaAudits.some((col: any) => col.name === 'record_hash')) {
+        db.exec("ALTER TABLE audit_records ADD COLUMN record_hash TEXT;");
+      }
+      if (!pragmaAudits.some((col: any) => col.name === 'sequence_number')) {
+        db.exec("ALTER TABLE audit_records ADD COLUMN sequence_number INTEGER DEFAULT 1;");
+      }
     }
   } catch {
     // Migration handled or already applied

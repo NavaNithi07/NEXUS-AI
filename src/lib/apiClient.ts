@@ -64,11 +64,27 @@ export const api = {
     login: (credentials: { email: string; password: string }) =>
       apiFetch<{
         token: string;
+        refreshToken?: string;
         user: { userId: string; email: string; role: string; name: string };
         expiresIn: string;
       }>('/api/auth/login', {
         method: 'POST',
         body: JSON.stringify(credentials),
+      }),
+    refresh: (refreshToken: string) =>
+      apiFetch<{
+        token: string;
+        refreshToken: string;
+        user: { userId: string; email: string; role: string };
+        expiresIn: string;
+      }>('/api/auth/refresh', {
+        method: 'POST',
+        body: JSON.stringify({ refreshToken }),
+      }),
+    logout: (refreshToken?: string) =>
+      apiFetch<{ success: boolean; message: string }>('/api/auth/logout', {
+        method: 'POST',
+        body: JSON.stringify({ refreshToken }),
       }),
   },
 
@@ -82,6 +98,7 @@ export const api = {
       emergencyHaltActive: boolean;
       aiEngine: string;
       persistence: string;
+      keyManagement?: any;
     }>('/api/health'),
   },
 
@@ -130,8 +147,27 @@ export const api = {
     list: () => apiFetch<any[]>('/api/transactions', { method: 'GET' }),
   },
 
+  reconciliation: {
+    run: () => apiFetch<{
+      timestamp: string;
+      totalAudited: number;
+      matchedCount: number;
+      mismatchCount: number;
+      unconfirmedCount: number;
+      discrepancies: any[];
+    }>('/api/reconciliation/run', { method: 'POST' }),
+  },
+
   auditLogs: {
     list: () => apiFetch<any[]>('/api/audit-logs', { method: 'GET' }),
+    verify: () => apiFetch<{
+      status: string;
+      isValid: boolean;
+      totalRecords: number;
+      headHash: string | null;
+      corruptedRecordId?: string;
+      timestamp: string;
+    }>('/api/audit-logs/verify', { method: 'GET' }),
   },
 
   security: {
