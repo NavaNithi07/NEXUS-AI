@@ -1,92 +1,157 @@
 # Nexus AI Wallet — Autonomous On-Chain AI Wallet Platform
 
-A production-ready autonomous on-chain AI agent wallet platform built with React, Vite, TypeScript, Express, Viem, and SQLite. Nexus AI enables autonomous agents to plan, execute, and monitor on-chain transactions governed strictly by deterministic security policies, velocity caps, allowlists, and global emergency circuit breakers.
+**FinTechathon 2026 Submission Edition**  
+*Decentralized Autonomous Account Abstraction & Institutional Policy Enclave*
 
 ---
 
-## Architecture Overview
+## 1. Architecture & Persistence Engine
 
-- **Frontend (`/src`)**: High-performance React 18 SPA with Tailwind CSS, Framer Motion, and Lucide icons. Communicates exclusively with the backend enclave via typed REST APIs and JWT Bearer authorization.
+Nexus AI Wallet operates on an institutional Enclave Architecture:
+- **Frontend SPA (`/src`)**: React 18, TypeScript, Vite, Tailwind CSS, Framer Motion, and Lucide icons. Runs in a zero-trust mode where private keys and root secrets never touch the browser. All operator actions are authenticated via cryptographic JWT Bearer tokens.
 - **Backend Enclave (`/server`)**: Node.js/Express service responsible for:
-  - AI transaction intent planning (deterministic rules engine or LLM).
-  - Multi-tier policy validation engine (spending caps, allowlists, daily velocity limits).
-  - Dynamic fee estimation with safety buffers and fee caps on Base Sepolia (`chainId: 84532`).
-  - Canonical payload hashing and strictly idempotent execution.
-  - SQLite WAL persistent transaction ledger, audit trail, and emergency state machine.
+  - **AI Transaction Intent Planning**: Parses user task goals into structured transaction proposals (action, token, recipient, amount). Default: deterministic rules engine; optional: pluggable LLM.
+  - **Multi-Tier Policy Engine**: Enforces single-transaction caps, daily velocity limits, and recipient allowlists before signing.
+  - **EIP-1559 Dynamic Gas Protection**: Queries Base Sepolia, applies a +20% safety buffer, and enforces a 100 Gwei hard cap.
+  - **Canonical Idempotency Engine**: SHA-256 canonical hashing ensures duplicate requests return cached results, while payload tampering triggers HTTP 409 Conflict.
+  - **Authoritative Persistence Engine (SQLite WAL)**: All agents, policies, transactions, audit trails, idempotency records, and emergency state are persisted in **SQLite** via `better-sqlite3` located at `server/nexus-wallet.db` with Write-Ahead Logging (`WAL`) mode enabled. *(Note: Early design prototypes referenced JSON files; the production enclave is strictly powered by SQLite WAL).*
 
 ---
 
-## Configuration & Environment Variables
+## 2. Configuration & Environment Variables
 
-All sensitive backend configuration is managed via environment variables stored in `server/.env` (which is excluded from Git via `.gitignore`). An example template is provided in [`server/.env.example`](file:///c:/Users/vignesh/Downloads/AUTONOMOUS%20ON-CHAIN%20AI%20WALLET%20PLATFORM/AUTONOMOUS%20ON-CHAIN%20AI%20WALLET%20PLATFORM/server/.env.example).
-
-### Required & Documented Variables
+All sensitive backend configuration is managed via `server/.env` (excluded from version control). A safe template is provided in [`server/.env.example`](file:///c:/Users/vignesh/Downloads/AUTONOMOUS%20ON-CHAIN%20AI%20WALLET%20PLATFORM/AUTONOMOUS%20ON-CHAIN%20AI%20WALLET%20PLATFORM/server/.env.example).
 
 | Variable Name | Required | Default / Example | Description |
-| :--- | :--- | :--- | :--- |
-| `PORT` | Optional | `3001` | Port on which the Express backend enclave listens. |
-| `NODE_ENV` | Optional | `development` | Environment mode (`development` or `production`). |
-| `CHAIN_ID` | Optional | `84532` | Target EVM Chain ID. Enforces Base Sepolia testnet execution. |
-| `NETWORK_NAME` | Optional | `Base Sepolia` | Display name of the active network. |
-| `RPC_URL` | Optional | `https://sepolia.base.org` | Primary JSON-RPC endpoint for Base Sepolia. |
-| `BLOCK_EXPLORER_URL` | Optional | `https://sepolia.basescan.org` | Block explorer URL for transaction verification links. |
-| `FALLBACK_CHAIN_ID` | Optional | `421614` | Secondary EVM Chain ID for fallback connectivity (Arbitrum Sepolia). |
-| `FALLBACK_NETWORK_NAME`| Optional | `Arbitrum Sepolia` | Display name of the fallback network. |
-| `FALLBACK_RPC_URL` | Optional | `https://sepolia-rollup.arbitrum.io/rpc` | Fallback JSON-RPC endpoint. |
-| `FALLBACK_BLOCK_EXPLORER_URL` | Optional | `https://sepolia.arbiscan.io` | Fallback block explorer URL. |
-| `TESTNET_PRIVATE_KEY` | **Required** | `0x4c0883a6...` | Dedicated low-value testnet private key. **NEVER use mainnet keys or keys with real asset value.** |
-| `AI_PROVIDER` | Optional | `deterministic` | Intent extraction provider: `deterministic` (default rule engine) or `llm`. |
-| `AI_API_KEY` | Optional | *(empty)* | Optional API key when using an external LLM provider. |
-| `JWT_SECRET` | **Required** | *(32+ hex characters)* | Cryptographic HMAC-SHA256 secret for signing and verifying operator JWTs (min 16 chars required). |
-| `JWT_EXPIRES_IN` | Optional | `2h` | Expiration duration for operator access tokens (e.g., `2h`, `1d`). |
-| `OPERATOR_EMAIL` | **Required** | `operator@nexus.ai` | Vault operator login email address. |
-| `OPERATOR_PASSWORD` | **Required** | `nexus2026!secure` | Vault operator authentication password. |
-| `OPERATOR_API_KEY` | Optional | `nexus-dev-api-key...` | Secondary API key for automated test runner scripts. |
-
-### Security Guarantees & Secret Isolation
-
-1. **`.env` Exclusion**: `.env` and `*.db` files are strictly excluded from source control in both root and server `.gitignore`.
-2. **Frontend Enclave Isolation**: Neither the private key (`TESTNET_PRIVATE_KEY`), JWT secret (`JWT_SECRET`), nor operator passwords exist in the client bundle. Only short-lived JWT tokens obtained via `/api/auth/login` are used in the browser.
-3. **No Fabricated Hashes**: Unsigned or rejected transactions never output synthetic `0x` hashes; real hashes are only emitted once on-chain receipts are confirmed.
-
----
-
-## Running the Platform Locally
-
-### 1. Start the Backend Enclave
-```bash
-cd server
-npm install
-npm run dev
-# Server listens on http://localhost:3001
-```
-
-### 2. Start the Frontend Application
-```bash
-# In the root project directory:
-npm install
-npm run dev
-# Vite runs on http://localhost:4173 with proxy configured for /api -> http://localhost:3001
-```
-
-### 3. Running Automated Tests
-```bash
-cd server
-npm test
-# Runs unit, integration, and security hardening suites:
-# - E2E planning & policy engine checks
-# - JWT RBAC authorization
-# - Idempotency concurrency & payload mismatch conflict detection (HTTP 409)
-# - Emergency stop persistence and restart survival
-# - Gas fee buffers & caps
-```
-
----
-
-## Operator Development Credentials (Testnet)
-
-- **Email**: `operator@nexus.ai`
-- **Password**: `NexusVault_2026!SecOps_Alpha` (Rotated secure password set in `server/.env`)
+| :--- | :---: | :--- | :--- |
+| `PORT` | Optional | `3001` | Backend enclave listening port. |
+| `NODE_ENV` | Optional | `development` | Runtime mode (`development` or `production`). |
+| `CHAIN_ID` | **Required** | `84532` | Target EVM Chain ID (Base Sepolia enforced). |
+| `NETWORK_NAME` | Optional | `Base Sepolia` | Active network display name. |
+| `RPC_URL` | **Required** | `https://sepolia.base.org` | Primary JSON-RPC endpoint. |
+| `BLOCK_EXPLORER_URL`| Optional | `https://sepolia.basescan.org` | Block explorer URL. |
+| `TESTNET_PRIVATE_KEY`| **Required** | `0x4c0883a6...` | Dedicated low-value testnet signer private key (**never mainnet**). |
+| `AI_PROVIDER` | Optional | `deterministic` | Intent planner: `deterministic` (default) or `llm`. |
+| `JWT_SECRET` | **Required** | *(32+ hex chars)* | HMAC-SHA256 secret for signing operator JWTs (min 16 chars). |
+| `JWT_EXPIRES_IN` | Optional | `2h` | Access token lifespan (e.g. `2h`, `1d`). |
+| `OPERATOR_EMAIL` | **Required** | `operator@nexus.ai` | Vault operator login email. |
+| `OPERATOR_PASSWORD` | **Required** | `NexusVault_2026!SecOps_Alpha` | Rotated secure password (quoted in `.env`). |
 
 > [!IMPORTANT]
-> Keep `.env` strictly excluded from Git. Never reveal private keys, JWT secrets, or production passwords during demo presentations or public recordings.
+> `server/.env` is excluded from Git via `.gitignore`. Never reveal private keys, JWT secrets, or production passwords during demo presentations or public recordings.
+
+---
+
+## 3. Installation & Quickstart
+
+### Prerequisites
+- Node.js v18+ (tested on Node.js v24.12.0)
+- npm v10+
+
+### Step 1: Install Dependencies
+```bash
+# In the repository root (installs frontend packages):
+npm install
+
+# In the server directory (installs enclave packages):
+cd server
+npm install
+cd ..
+```
+
+### Step 2: Configure Environment
+```bash
+cd server
+cp .env.example .env
+# Edit server/.env with your secrets or use the default testnet credentials
+cd ..
+```
+
+### Step 3: Start Services
+```bash
+# Terminal 1: Start Backend Enclave (http://localhost:3001)
+cd server
+npm run dev
+
+# Terminal 2: Start Frontend Application (http://localhost:4173)
+npm run dev
+```
+
+---
+
+## 4. Testing & Verification Suites
+
+```bash
+# Run comprehensive backend test suite (39 tests: E2E policies + security hardening)
+cd server
+npm test
+
+# Run SQLite WAL persistence & hash integrity audit
+npx tsx test/audit_verification.ts
+cd ..
+
+# Run end-to-end acceptance integration suite against running servers
+node scripts/verify_acceptance_checklist.mjs
+
+# Run production builds
+cd server && npm run build && cd ..
+npm run build
+```
+
+---
+
+## 5. Security Controls & Guarantees
+
+1. **Zero Client-Side Secrets**: Scanned production bundle (`dist/assets/`) confirms 0 private keys, 0 JWT secrets, and 0 operator API keys.
+2. **Deterministic Pre-Flight Interception**: Transactions failing spending limits, velocity limits, or recipient allowlists are rejected **before cryptographic signing**.
+3. **No Fabricated Hashes**: Unsigned or rejected transactions never output synthetic `0x` hashes; real hashes are only emitted once on-chain receipts are confirmed.
+4. **Idempotency Conflict Guard**: Duplicate requests with identical payloads return cached results; reusing an idempotency key with modified parameters returns **HTTP 409 Conflict**.
+5. **Global Circuit Breaker**: Engaging the emergency stop immediately locks out all execution endpoints (HTTP 403) and persists across process restarts.
+
+---
+
+## 6. Known Limitations
+
+1. **Testnet Wallet Funding**: The testnet signer wallet currently holds `0 ETH`. Attempting a live on-chain broadcast correctly fails closed with an insufficient balance notice. Read-only on-chain RPC operations are fully verified.
+2. **AI Provider Mode**: Set to `deterministic` by default for zero-latency, predictable hackathon demonstrations. An external LLM can be connected by setting `AI_PROVIDER=llm` and providing `AI_API_KEY`.
+3. **Development Dependencies**: Minor npm audit warnings in dev tooling (`esbuild`, `tailwindcss@3.4`) are retained intentionally to preserve frontend layout stability.
+
+---
+
+## 7. 5-Minute Reproducible Demo Script
+
+### Demo Credentials
+- **Email**: `operator@nexus.ai`
+- **Password**: `NexusVault_2026!SecOps_Alpha`
+
+### Demo Steps:
+1. **0:00 - 1:00 | Login & Dashboard**
+   - Navigate to `http://localhost:4173/login`.
+   - Log in as Chief Treasury Operator.
+   - Show live Base Sepolia network connection, wallet address `0x2836...f657`, and enclave status on the Dashboard.
+2. **1:00 - 2:00 | AI Agents & Policies**
+   - Navigate to **Agents** and **Policies**.
+   - Show Autonomous Treasury Bot parameters: 0.01 ETH single-tx limit, 0.05 ETH daily budget, and recipient allowlists.
+3. **2:00 - 3:00 | Security Demonstration (Policy Rejections)**
+   - On **Agents**, select the Treasury Bot and run task: `Send 0.5 ETH to 0x70997970C51812dc3A010C7d01b50e0d17dc79C8`.
+   - **Show result**: Pre-flight rejection before signing (exceeds 0.01 ETH cap).
+   - Run task to an unapproved address (`0x999999cf1046e68e36e1aA2E0E07105eDDD1f08E`).
+   - **Show result**: Immediate allowlist violation rejection.
+4. **3:00 - 4:00 | Idempotency & Emergency Stop**
+   - Trigger the **Global Emergency Killswitch** on the Security page.
+   - Attempt an agent transfer: instantly rejected (HTTP 403).
+   - Demonstrate that unauthorized attempts to resume are blocked, then restore operations.
+5. **4:00 - 5:00 | Transactions & Audit Trail**
+   - Navigate to **Transactions** and **Monitoring**.
+   - Show honest status logging: rejected jobs display clear policy violations with zero synthetic hashes; confirmed jobs show verified receipts.
+
+---
+
+## 8. Presentation Screenshots
+
+High-resolution presentation screenshots are available in [`docs/screenshots/`](file:///c:/Users/vignesh/Downloads/AUTONOMOUS%20ON-CHAIN%20AI%20WALLET%20PLATFORM/AUTONOMOUS%20ON-CHAIN%20AI%20WALLET%20PLATFORM/docs/screenshots/):
+- [`01_dashboard.png`](file:///c:/Users/vignesh/Downloads/AUTONOMOUS%20ON-CHAIN%20AI%20WALLET%20PLATFORM/AUTONOMOUS%20ON-CHAIN%20AI%20WALLET%20PLATFORM/docs/screenshots/01_dashboard.png) — Live Base Sepolia Dashboard & Telemetry
+- [`02_policies.png`](file:///c:/Users/vignesh/Downloads/AUTONOMOUS%20ON-CHAIN%20AI%20WALLET%20PLATFORM/AUTONOMOUS%20ON-CHAIN%20AI%20WALLET%20PLATFORM/docs/screenshots/02_policies.png) — Active Spending Limits & Velocity Rules
+- [`03_transactions.png`](file:///c:/Users/vignesh/Downloads/AUTONOMOUS%20ON-CHAIN%20AI%20WALLET%20PLATFORM/AUTONOMOUS%20ON-CHAIN%20AI%20WALLET%20PLATFORM/docs/screenshots/03_transactions.png) — Honest Transaction Ledger
+- [`04_monitoring.png`](file:///c:/Users/vignesh/Downloads/AUTONOMOUS%20ON-CHAIN%20AI%20WALLET%20PLATFORM/AUTONOMOUS%20ON-CHAIN%20AI%20WALLET%20PLATFORM/docs/screenshots/04_monitoring.png) — Real-Time Node Telemetry & Persistent Audit Logs
+- [`05_emergency_stop.png`](file:///c:/Users/vignesh/Downloads/AUTONOMOUS%20ON-CHAIN%20AI%20WALLET%20PLATFORM/AUTONOMOUS%20ON-CHAIN%20AI%20WALLET%20PLATFORM/docs/screenshots/05_emergency_stop.png) — Active Global Circuit Breaker Lockout
