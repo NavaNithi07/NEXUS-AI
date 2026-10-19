@@ -21,12 +21,14 @@ import {
 import { useAppStore } from '../store/appStore';
 import { StatusBadge } from '../components/ui/StatusBadge';
 import { StatCard } from '../components/ui/StatCard';
+import { TransactionBuilder } from '../components/TransactionBuilder';
 import type { Transaction } from '../types';
 
 export const Transactions: React.FC = () => {
   const { transactions, agents } = useAppStore();
   const [backendTxs, setBackendTxs] = useState<any[]>([]);
   const [txLoading, setTxLoading] = useState(false);
+  const [isBuilderOpen, setIsBuilderOpen] = useState(false);
 
   const [filterType, setFilterType] = useState('all');
   const [filterAgent, setFilterAgent] = useState('all');
@@ -139,13 +141,22 @@ export const Transactions: React.FC = () => {
           </p>
         </div>
 
-        <button
-          onClick={handleExportCSV}
-          className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-200 text-xs sm:text-sm font-semibold border border-slate-700/80 active:scale-95 transition-all self-start sm:self-auto"
-        >
-          <Download className="w-4 h-4 text-cyan-400" />
-          <span>Export CSV Ledger</span>
-        </button>
+        <div className="flex items-center gap-2.5 self-start sm:self-auto">
+          <button
+            onClick={() => setIsBuilderOpen(true)}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 text-xs sm:text-sm font-bold shadow-lg shadow-cyan-500/20 active:scale-95 transition-all"
+          >
+            <Sparkles className="w-4 h-4" />
+            <span>New Safe Transfer</span>
+          </button>
+          <button
+            onClick={handleExportCSV}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-200 text-xs sm:text-sm font-semibold border border-slate-700/80 active:scale-95 transition-all"
+          >
+            <Download className="w-4 h-4 text-cyan-400" />
+            <span>Export CSV</span>
+          </button>
+        </div>
       </div>
 
       {/* Stats */}
@@ -428,6 +439,20 @@ export const Transactions: React.FC = () => {
                 Close Inspector
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* TRANSACTION BUILDER MODAL */}
+      {isBuilderOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md overflow-y-auto animate-fadeIn">
+          <div className="w-full max-w-2xl my-8">
+            <TransactionBuilder
+              onClose={() => setIsBuilderOpen(false)}
+              onSuccess={() => {
+                fetchBackendTxs();
+              }}
+            />
           </div>
         </div>
       )}

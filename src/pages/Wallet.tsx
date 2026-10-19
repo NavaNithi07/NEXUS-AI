@@ -28,6 +28,7 @@ import {
 import { useAppStore } from '../store/appStore';
 import { StatCard } from '../components/ui/StatCard';
 import { supportedNetworks } from '../data/mockData';
+import { TransactionBuilder } from '../components/TransactionBuilder';
 
 const COLORS = ['#22d3ee', '#8b5cf6', '#f59e0b', '#10b981', '#ec4899'];
 
@@ -363,108 +364,17 @@ export const Wallet: React.FC = () => {
         </div>
       </div>
 
-      {/* SEND MODAL */}
+      {/* SEND MODAL / TRANSACTION BUILDER */}
       {isSendOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fadeIn">
-          <div className="w-full max-w-lg rounded-3xl bg-slate-900 border border-slate-750 shadow-2xl p-6 sm:p-8">
-            <div className="flex items-center justify-between pb-4 border-b border-slate-800 mb-6">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 flex items-center justify-center font-bold">
-                  <Send className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-lg font-bold text-white">Transfer Treasury Asset</h3>
-                  <p className="text-xs text-slate-400">Simulate on-chain token dispatch from vault</p>
-                </div>
-              </div>
-              <button onClick={() => setIsSendOpen(false)} className="p-2 rounded-xl text-slate-400 hover:text-white">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {sendError && (
-              <div className="mb-4 p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs flex items-center gap-2">
-                <AlertCircle className="w-4 h-4 flex-shrink-0" />
-                <span>{sendError}</span>
-              </div>
-            )}
-
-            <form onSubmit={handleSend} className="space-y-4 text-xs font-sans">
-              <div>
-                <label className="block text-slate-300 font-medium mb-1.5">Select Asset</label>
-                <select
-                  value={sendSymbol}
-                  onChange={(e) => setSendSymbol(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white focus:outline-none focus:border-cyan-400"
-                >
-                  {walletAssets.map((a) => (
-                    <option key={a.symbol} value={a.symbol}>
-                      {a.name} ({a.symbol}) — Avail: {a.balance.toLocaleString()} {a.symbol}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <div className="flex justify-between items-center mb-1.5">
-                  <label className="text-slate-300 font-medium">Transfer Amount</label>
-                  <span className="text-[11px] text-cyan-400 font-mono">
-                    Max: {selectedAsset?.balance.toFixed(4)} {sendSymbol}
-                  </span>
-                </div>
-                <div className="relative">
-                  <input
-                    type="number"
-                    step="any"
-                    required
-                    placeholder="0.00"
-                    value={sendAmount}
-                    onChange={(e) => setSendAmount(e.target.value === '' ? '' : Number(e.target.value))}
-                    className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white font-mono focus:outline-none focus:border-cyan-400"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setSendAmount(selectedAsset?.balance || 0)}
-                    className="absolute right-2.5 top-1/2 -translate-y-1/2 px-2 py-0.5 rounded text-[10px] bg-slate-800 text-cyan-400 font-mono hover:bg-slate-700"
-                  >
-                    MAX
-                  </button>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-slate-300 font-medium mb-1.5">Recipient Address (0x...)</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="0x71C69184e698C0d3fe651B144E5dF5a3304E7b21"
-                  value={sendRecipient}
-                  onChange={(e) => setSendRecipient(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white font-mono focus:outline-none focus:border-cyan-400"
-                />
-              </div>
-
-              <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 text-[11px] font-mono text-slate-400 flex justify-between">
-                <span>Estimated Gas: ~0.0006 ETH ($1.85)</span>
-                <span className="text-emerald-400">Route: Arbitrum Sepolia</span>
-              </div>
-
-              <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-800">
-                <button
-                  type="button"
-                  onClick={() => setIsSendOpen(false)}
-                  className="px-4 py-2 rounded-xl text-slate-400 hover:text-white"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-6 py-2.5 rounded-xl font-bold bg-cyan-500 hover:bg-cyan-400 text-slate-950 shadow-lg shadow-cyan-500/20 active:scale-95 transition-all"
-                >
-                  Confirm Transfer
-                </button>
-              </div>
-            </form>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md overflow-y-auto animate-fadeIn">
+          <div className="w-full max-w-2xl my-8">
+            <TransactionBuilder
+              onClose={() => setIsSendOpen(false)}
+              onSuccess={(tx) => {
+                setToastMessage(`Safe transfer submitted! Hash: ${tx.txHash ? tx.txHash.slice(0, 10) + '...' : 'Confirmed'}`);
+                setTimeout(() => setToastMessage(null), 5000);
+              }}
+            />
           </div>
         </div>
       )}

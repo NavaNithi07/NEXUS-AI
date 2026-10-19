@@ -19,6 +19,8 @@ export interface AppConfig {
   operatorApiKey: string;
   aiProvider: 'deterministic' | 'llm';
   aiApiKey?: string;
+  alchemyApiKey?: string;
+  alchemyRpcUrl?: string;
   jwtSecret: string;
   jwtExpiresIn: string;
   operatorEmail: string;
@@ -43,6 +45,8 @@ export const config: AppConfig = {
   operatorApiKey: process.env.OPERATOR_API_KEY || 'nexus-dev-api-key-change-in-production',
   aiProvider: (process.env.AI_PROVIDER === 'llm' ? 'llm' : 'deterministic'),
   aiApiKey: process.env.AI_API_KEY || undefined,
+  alchemyApiKey: process.env.ALCHEMY_API_KEY ? process.env.ALCHEMY_API_KEY.trim() : undefined,
+  alchemyRpcUrl: process.env.ALCHEMY_RPC_URL || (process.env.ALCHEMY_API_KEY ? `https://base-sepolia.g.alchemy.com/v2/${process.env.ALCHEMY_API_KEY.trim()}` : undefined),
   jwtSecret: (() => {
     const secret = process.env.JWT_SECRET;
     if (!secret || secret.trim().length < 16) {

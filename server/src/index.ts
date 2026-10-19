@@ -11,6 +11,11 @@ import {
 import { getKeyManagementProvider } from './blockchain/keyManagement.js';
 import { planTransactionProposal } from './ai/planner.js';
 import { evaluateTransactionPolicy } from './policy/engine.js';
+import {
+  simulateAndPrepareTransaction,
+  validateProposedTransaction,
+  computePayloadHash,
+} from './blockchain/simulator.js';
 import { db } from './audit/store.js';
 import {
   requireOperatorAuth,
@@ -628,6 +633,282 @@ app.post('/api/agents/:id/execute', executionLimiter, requireOperatorAuth, async
     }
     console.error('[Execution Error]', err);
     res.status(500).json({ error: 'Internal execution pipeline error', message: err.message });
+  }
+});
+
+// ════════════════════════════════════════════════════════════════════════════════
+// 4B. Safe Transaction Builder: Simulation & Pre-Flight Analysis
+// ════════════════════════════════════════════════════════════════════════════════
+app.post('/api/wallet/simulate', async (req: Request, res: Response) => {
+  try {
+    const { recipient, amountEth, calldata, chainId, agentId } = req.body || {};
+
+    const agent = (agentId ? db.getAgent(agentId) : null) || db.getAgents()[0] || {
+      id: 'agt-builder',
+      name: 'Transaction Builder Safe Enclave',
+      status: 'active' as const,
+      role: 'Treasury Safe Transfer',
+      maxTxAmount: 1.0,
+      dailyLimit: 2.0,
+      spentToday: 0,
+      allowedTokens: ['ETH', 'USDC'],
+      allowedRecipients: [],
+    };
+
+    const policies = db.getPolicies();
+    const isEmergencyPaused = db.getEmergencyStatus();
+
+    const simulationResult = await simulateAndPrepareTransaction(
+      {
+        recipient,
+        amountEth,
+        calldata,
+        chainId: Number(chainId) || config.chainId,
+        agentId: agent.id,
+      },
+      {
+        agent,
+        policies,
+        isEmergencyPaused,
+      }
+    );
+
+    return res.json(simulationResult);
+  } catch (err: any) {
+    const isBadInput = err.message.includes('Invalid') || err.message.includes('required') || err.message.includes('Chain mismatch');
+    const statusCode = isBadInput ? 400 : 503;
+    return res.status(statusCode).json({
+      error: 'Simulation Failed',
+      message: err.message,
+    });
+  }
+});
+
+// ── Safe Transaction Builder: Authorized Execution & Signing ─────────────────
+app.post('/api/wallet/execute-safe', requireOperatorAuth, async (req: Request, res: Response) => {
+  const idempotencyKey = (req.headers['x-idempotency-key'] as string) || req.body?.idempotencyKey;
+  let payloadHash: string | undefined;
+
+  try {
+    const { recipient, amountEth, calldata, chainId, preparedPayloadHash, agentId } = req.body || {};
+
+    // 1. Strict Emergency Stop Check
+    if (db.getEmergencyStatus()) {
+      return res.status(403).json({
+        success: false,
+        status: 'rejected',
+        error: 'Global Emergency Halt is ACTIVE. All on-chain transfers are blocked.',
+        violations: ['Global Emergency Halt is ACTIVE.'],
+      });
+    }
+
+    // 2. Validate input parameters
+    const validated = validateProposedTransaction({
+      recipient,
+      amountEth,
+      calldata,
+      chainId: Number(chainId) || config.chainId,
+    });
+
+    // 3. Verify cryptographic binding hash to prevent post-simulation tampering
+    payloadHash = computePayloadHash({
+      chainId: validated.chainId,
+      from: serverAccount.address,
+      to: validated.recipient,
+      amountEth: validated.amountEth,
+      calldata: validated.calldata,
+    });
+
+    if (preparedPayloadHash && preparedPayloadHash !== payloadHash) {
+      return res.status(409).json({
+        success: false,
+        status: 'rejected',
+        error: 'Payload Hash Mismatch: Transaction parameters were modified after simulation. Please re-simulate.',
+        violations: ['Transaction parameters altered between simulation and signing authorization.'],
+      });
+    }
+
+    // 4. Idempotency Key Handling
+    const jobId = `tx-safe-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+    if (idempotencyKey) {
+      const reservation = db.reserveIdempotencyKey(idempotencyKey, payloadHash);
+      if (reservation.status === 'conflict') {
+        return res.status(409).json({
+          error: 'Conflict',
+          message: `Idempotency key payload mismatch. Key '${idempotencyKey}' was already used with a different task payload.`,
+        });
+      }
+      if (reservation.status === 'completed' && reservation.job) {
+        return res.json({
+          success: reservation.job.status !== 'rejected',
+          status: reservation.job.status,
+          cached: true,
+          job: reservation.job,
+        });
+      }
+      if (reservation.status === 'in_flight') {
+        return res.status(409).json({
+          error: 'Conflict',
+          message: `A request with idempotency key '${idempotencyKey}' is already processing. Concurrent duplicate execution blocked.`,
+        });
+      }
+    }
+
+    // 5. Select agent and policies for authoritative evaluation
+    const agent = (agentId ? db.getAgent(agentId) : null) || db.getAgents()[0] || {
+      id: 'agt-builder',
+      name: 'Transaction Builder Safe Enclave',
+      status: 'active' as const,
+      role: 'Treasury Safe Transfer',
+      maxTxAmount: 1.0,
+      dailyLimit: 2.0,
+      spentToday: 0,
+      allowedTokens: ['ETH', 'USDC'],
+      allowedRecipients: [],
+    };
+    const policies = db.getPolicies();
+    const isEmergencyPaused = db.getEmergencyStatus();
+
+    const walletStatus = await getOnChainWalletStatus(isEmergencyPaused);
+    const balanceEth = parseFloat(walletStatus.nativeBalanceEth);
+
+    const proposal = {
+      task: `Safe Transfer ${validated.amountEth} ETH to ${validated.recipient}`,
+      action: 'transfer' as const,
+      chainId: validated.chainId,
+      recipient: validated.recipient,
+      token: 'ETH',
+      amount: validated.amountEth,
+      reason: 'User-authorized safe transfer execution',
+      confidence: 1,
+    };
+
+    const policyResult = evaluateTransactionPolicy({
+      agent,
+      policies,
+      proposal,
+      isEmergencyPaused,
+      walletBalanceEth: balanceEth,
+    });
+
+    if (!policyResult.approved) {
+      if (idempotencyKey) db.releaseIdempotencyKey(idempotencyKey);
+      return res.status(403).json({
+        success: false,
+        status: 'rejected',
+        error: 'Transaction rejected by NEXUS Policy Engine.',
+        violations: policyResult.violations,
+      });
+    }
+
+    // 6. Atomic spending reservation
+    try {
+      db.atomicSpendingUpdate(agent.id, validated.amountEth, agent.dailyLimit);
+    } catch (spendErr: any) {
+      if (idempotencyKey) db.releaseIdempotencyKey(idempotencyKey);
+      return res.status(403).json({
+        success: false,
+        status: 'rejected',
+        error: `Daily spending limit reached: ${spendErr.message}`,
+        violations: [spendErr.message],
+      });
+    }
+
+    // 7. Sign and broadcast on-chain
+    const executedAt = new Date().toISOString();
+    let executionResult: ExecutionJobResult;
+
+    try {
+      const tx = await sendNativeToken(validated.recipient, validated.amountEth);
+
+      executionResult = {
+        jobId,
+        taskId: `safe-task-${Date.now()}`,
+        agentId: agent.id,
+        agentName: agent.name,
+        proposal,
+        policyResult,
+        status: 'confirmed',
+        txHash: tx.txHash,
+        explorerUrl: tx.explorerUrl,
+        blockNumber: tx.blockNumber,
+        gasUsed: tx.gasUsed,
+        effectiveGasPrice: tx.effectiveGasPrice,
+        executedAt,
+      };
+
+      db.addAuditRecord({
+        id: `audit-${Date.now()}`,
+        timestamp: executedAt,
+        agentId: agent.id,
+        agentName: agent.name,
+        taskGoal: proposal.task,
+        proposal,
+        policyCheck: policyResult,
+        outcome: 'confirmed',
+        txHash: tx.txHash,
+        explorerUrl: tx.explorerUrl,
+        blockNumber: tx.blockNumber,
+        details: `Safe transfer CONFIRMED on Base Sepolia. Block: #${tx.blockNumber}. Gas: ${tx.gasUsed}. PayloadHash: ${payloadHash}`,
+      });
+    } catch (broadcastErr: any) {
+      const capturedTxHash = broadcastErr.txHash || undefined;
+      const isAmbiguousTimeout = Boolean(broadcastErr.isReceiptTimeout);
+
+      if (!isAmbiguousTimeout && !capturedTxHash) {
+        try {
+          db.atomicSpendingUpdate(agent.id, -validated.amountEth, agent.dailyLimit + validated.amountEth);
+        } catch { /* best effort rollback */ }
+      }
+
+      executionResult = {
+        jobId,
+        taskId: `safe-task-${Date.now()}`,
+        agentId: agent.id,
+        agentName: agent.name,
+        proposal,
+        policyResult,
+        status: 'failed',
+        txHash: capturedTxHash,
+        explorerUrl: capturedTxHash ? `${config.blockExplorerUrl}/tx/${capturedTxHash}` : undefined,
+        executedAt,
+        error: `Execution error: ${broadcastErr.message}.${isAmbiguousTimeout ? ' Broadcasted; awaiting receipt reconciliation.' : ' No on-chain transfer completed.'}`,
+      };
+
+      db.addAuditRecord({
+        id: `audit-${Date.now()}`,
+        timestamp: executedAt,
+        agentId: agent.id,
+        agentName: agent.name,
+        taskGoal: proposal.task,
+        proposal,
+        policyCheck: policyResult,
+        outcome: 'failed',
+        txHash: capturedTxHash,
+        explorerUrl: capturedTxHash ? `${config.blockExplorerUrl}/tx/${capturedTxHash}` : undefined,
+        details: `Execution FAILED: ${broadcastErr.message}. Wallet balance: ${balanceEth} ETH.`,
+      });
+    }
+
+    db.addExecutionJob(executionResult, idempotencyKey, payloadHash);
+    if (idempotencyKey) {
+      db.completeIdempotencyKey(
+        idempotencyKey,
+        jobId,
+        executionResult.status === 'confirmed' ? 'completed' : 'rejected'
+      );
+    }
+
+    const httpStatus = executionResult.status === 'confirmed' ? 200 : 422;
+    return res.status(httpStatus).json({
+      success: executionResult.status === 'confirmed',
+      status: executionResult.status,
+      job: executionResult,
+    });
+  } catch (err: any) {
+    if (idempotencyKey) db.releaseIdempotencyKey(idempotencyKey);
+    console.error('[Safe Transfer Error]', err);
+    return res.status(500).json({ error: 'Safe transfer execution pipeline error', message: err.message });
   }
 });
 
