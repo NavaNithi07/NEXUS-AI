@@ -380,7 +380,50 @@ export function addAuditRecord(record: AuditRecord): ChainedAuditRecord {
   return chainedRecord;
 }
 
+export function ensureAuditChainIntegrity(): void {
+  const db = getDb();
+  try {
+    const unchained = db.prepare("SELECT id FROM audit_records WHERE record_hash IS NULL OR record_hash = ''").all();
+    if (!unchained || unchained.length === 0) return;
+
+    const rows = db.prepare('SELECT * FROM audit_records ORDER BY timestamp ASC').all() as any[];
+    let prevHash = GENESIS_HASH;
+    const updateStmt = db.prepare('UPDATE audit_records SET prev_hash = ?, record_hash = ?, sequence_number = ? WHERE id = ?');
+
+    const tx = db.transaction(() => {
+      for (let i = 0; i < rows.length; i++) {
+        const r = rows[i];
+        const seq = i + 1;
+        const chainedRecord: ChainedAuditRecord = {
+          id: r.id,
+          timestamp: r.timestamp,
+          agentId: r.agent_id,
+          agentName: r.agent_name,
+          taskGoal: r.task_goal,
+          proposal: typeof r.proposal === 'string' ? JSON.parse(r.proposal) : r.proposal,
+          policyCheck: typeof r.policy_check === 'string' ? JSON.parse(r.policy_check) : r.policy_check,
+          outcome: r.outcome,
+          txHash: r.tx_hash,
+          explorerUrl: r.explorer_url,
+          blockNumber: r.block_number,
+          details: r.details,
+          prevHash,
+          recordHash: '',
+          sequenceNumber: seq,
+        };
+        const recordHash = computeRecordHash(prevHash, chainedRecord);
+        updateStmt.run(prevHash, recordHash, seq, r.id);
+        prevHash = recordHash;
+      }
+    });
+    tx();
+  } catch (err: any) {
+    console.warn('[Audit Chain] Backfill notice:', err.message);
+  }
+}
+
 export function getAuditRecords(): ChainedAuditRecord[] {
+  ensureAuditChainIntegrity();
   const db = getDb();
   const rows = db.prepare('SELECT * FROM audit_records ORDER BY timestamp DESC LIMIT 500').all() as any[];
   return rows.map((r) => ({
@@ -406,6 +449,7 @@ export function getAuditRecords(): ChainedAuditRecord[] {
  * Validates the entire cryptographic hash chain of the audit trail
  */
 export function verifyAuditTrail() {
+  ensureAuditChainIntegrity();
   const records = getAuditRecords();
   return verifyAuditChainIntegrity(records);
 }
