@@ -24,6 +24,7 @@ import {
   type ExecutionJobResult,
   type AuditRecord,
 } from './types/backend.js';
+import { initializeNeonSchema, syncSqliteToNeon } from './db/neon.js';
 
 const app = express();
 
@@ -126,7 +127,8 @@ app.get('/api/health', async (_req: Request, res: Response) => {
       nativeBalanceEth: walletStatus.nativeBalanceEth,
       emergencyHaltActive: walletStatus.isEmergencyPaused,
       aiEngine: config.aiProvider,
-      persistence: 'sqlite',
+      persistence: process.env.DATABASE_URL ? 'neon-postgresql' : 'sqlite',
+      database: process.env.DATABASE_URL ? 'Neon Serverless PostgreSQL (ep-mute-morning-b4sed3pl)' : 'SQLite WAL (nexus-wallet.db)',
     });
   } catch (err: any) {
     res.status(500).json({ status: 'unhealthy', error: err.message });
@@ -571,10 +573,17 @@ app.listen(PORT, () => {
   console.log(`  Port      : ${PORT}`);
   console.log(`  Network   : ${config.networkName} (Chain ${config.chainId})`);
   console.log(`  Signer    : ${serverAccount.address}`);
-  console.log(`  Persist   : SQLite (nexus-wallet.db)`);
+  console.log(`  Persist   : ${process.env.DATABASE_URL ? 'Neon PostgreSQL (Serverless Cloud)' : 'SQLite (nexus-wallet.db)'}`);
   console.log(`  AI Engine : ${config.aiProvider}`);
   console.log(`  Auth      : API Key required on write endpoints`);
   console.log(`=======================================================`);
+
+  // Initialize and synchronize with Neon PostgreSQL if configured
+  if (process.env.DATABASE_URL) {
+    initializeNeonSchema()
+      .then(() => syncSqliteToNeon())
+      .catch((err) => console.warn('[Neon DB] Startup sync warning:', err.message));
+  }
 
   // Validate required env
   if (!process.env.TESTNET_PRIVATE_KEY) {
