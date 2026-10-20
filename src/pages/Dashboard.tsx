@@ -388,69 +388,71 @@ export const Dashboard: React.FC = () => {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Recent Transactions Table */}
         <div className="rounded-3xl bg-slate-900/80 border border-slate-800 p-6 shadow-xl">
-          <div className="flex items-center justify-between mb-5">
-            <div>
-              <h3 className="text-base font-bold text-white flex items-center gap-2">
-                <Repeat className="w-4 h-4 text-cyan-400" />
-                <span>Recent Agent Transactions</span>
-              </h3>
-              <p className="text-xs text-slate-400 mt-0.5">Automated swaps, stakes and protocol approvals</p>
+          <div>
+            <div className="flex items-center justify-between mb-5">
+              <div>
+                <h3 className="text-base font-bold text-white flex items-center gap-2">
+                  <Repeat className="w-4 h-4 text-cyan-400" />
+                  <span>Recent Agent Transactions</span>
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5">Automated swaps, stakes and protocol approvals</p>
+              </div>
+              <button
+                onClick={() => navigate('/transactions')}
+                className="text-xs text-cyan-400 hover:text-cyan-300 flex items-center gap-1 font-medium transition-colors"
+              >
+                <span>Full Ledger</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </button>
             </div>
-            <button
-              onClick={() => navigate('/transactions')}
-              className="text-xs text-cyan-400 hover:text-cyan-300 flex items-center gap-1 font-medium transition-colors"
-            >
-              <span>Full Ledger</span>
-              <ArrowRight className="w-3.5 h-3.5" />
-            </button>
-          </div>
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead>
-                <tr className="border-b border-slate-800 text-slate-400 font-mono text-[11px]">
-                  <th className="pb-3 font-medium">AGENT / CALL</th>
-                  <th className="pb-3 font-medium">AMOUNT</th>
-                  <th className="pb-3 font-medium">DESTINATION</th>
-                  <th className="pb-3 font-medium text-right">STATUS</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-800/60 font-sans">
-                {transactions.length === 0 ? (
-                  <tr>
-                    <td colSpan={4} className="py-10 text-center text-slate-500 text-xs">
-                      <Repeat className="w-7 h-7 text-slate-600 mx-auto mb-2 opacity-50" />
-                      No transactions recorded yet. On-chain executions will stream here.
-                    </td>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead>
+                  <tr className="border-b border-slate-800 text-slate-400 font-mono text-[11px]">
+                    <th className="pb-3 font-medium">AGENT / CALL</th>
+                    <th className="pb-3 font-medium">AMOUNT</th>
+                    <th className="pb-3 font-medium">DESTINATION</th>
+                    <th className="pb-3 font-medium text-right">STATUS</th>
                   </tr>
-                ) : (
-                  transactions.slice(0, 5).map((tx) => (
-                    <tr key={tx.id} className="hover:bg-slate-800/30 transition-colors">
-                      <td className="py-3">
-                        <p className="font-semibold text-white">{tx.agentName}</p>
-                        <p className="text-[10px] text-slate-400 font-mono uppercase">{tx.type} • {tx.timestamp}</p>
-                      </td>
-                      <td className="py-3 font-mono font-medium text-slate-200">
-                        ${tx.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                        <span className="block text-[10px] text-slate-400">{tx.asset}</span>
-                      </td>
-                      <td className="py-3 text-slate-300 text-[11px] font-mono">
-                        {tx.destination}
-                      </td>
-                      <td className="py-3 text-right">
-                        <StatusBadge status={tx.status} size="sm" />
+                </thead>
+                <tbody className="divide-y divide-slate-800/60 font-sans">
+                  {transactions.length === 0 ? (
+                    <tr>
+                      <td colSpan={4} className="py-10 text-center text-slate-500 text-xs">
+                        <Repeat className="w-7 h-7 text-slate-600 mx-auto mb-2 opacity-50" />
+                        No transactions recorded yet. On-chain executions will stream here.
                       </td>
                     </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
+                  ) : (
+                    transactions.slice(0, 5).map((tx) => (
+                      <tr key={tx.id} className="hover:bg-slate-800/30 transition-colors">
+                        <td className="py-3">
+                          <p className="font-semibold text-white">{tx.agentName}</p>
+                          <p className="text-[10px] text-slate-400 font-mono uppercase">{tx.type} • {tx.timestamp}</p>
+                        </td>
+                        <td className="py-3 font-mono font-medium text-slate-200">
+                          ${tx.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                          <span className="block text-[10px] text-slate-400">{tx.asset}</span>
+                        </td>
+                        <td className="py-3 text-slate-300 text-[11px] font-mono">
+                          {tx.destination}
+                        </td>
+                        <td className="py-3 text-right">
+                          <StatusBadge status={tx.status} size="sm" />
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
 
         {/* AI Activity & Telemetry Feed */}
         <div className="rounded-3xl bg-slate-900/80 border border-slate-800 p-6 shadow-xl">
-          <div className="flex items-center justify-between mb-5">
+          <div className="flex items-center justify-between mb-4">
             <div>
               <h3 className="text-base font-bold text-white flex items-center gap-2">
                 <Activity className="w-4 h-4 text-violet-400" />
@@ -460,21 +462,21 @@ export const Dashboard: React.FC = () => {
             </div>
             <button
               onClick={() => navigate('/monitoring')}
-              className="text-xs text-cyan-400 hover:text-cyan-300 flex items-center gap-1 font-medium transition-colors"
+              className="text-xs text-cyan-400 hover:text-cyan-300 flex items-center gap-1 font-medium transition-colors shrink-0"
             >
               <span>View Logs</span>
               <ArrowRight className="w-3.5 h-3.5" />
             </button>
           </div>
 
-          <div className="space-y-3.5 max-h-[340px] overflow-y-auto pr-1">
+          <div className="space-y-3">
             {activityLogs.length === 0 ? (
               <div className="py-12 px-4 text-center rounded-2xl bg-slate-950/40 border border-dashed border-slate-800 text-slate-500 text-xs">
                 <Activity className="w-7 h-7 text-slate-600 mx-auto mb-2 opacity-50" />
                 System standing by. Neural telemetry events will stream here.
               </div>
             ) : (
-              activityLogs.slice(0, 5).map((log) => {
+              activityLogs.slice(0, 4).map((log) => {
                 let dotBg = 'bg-cyan-400';
                 if (log.severity === 'warning') dotBg = 'bg-amber-400';
                 if (log.severity === 'critical') dotBg = 'bg-rose-500';
@@ -483,17 +485,17 @@ export const Dashboard: React.FC = () => {
                 return (
                   <div
                     key={log.id}
-                    className="p-3 rounded-2xl bg-slate-800/40 border border-slate-800 hover:border-slate-750 transition-colors"
+                    className="p-3 rounded-2xl bg-slate-800/40 border border-slate-800 hover:border-slate-700 transition-colors"
                   >
                     <div className="flex items-center justify-between text-xs mb-1">
                       <div className="flex items-center gap-2">
-                        <span className={`w-2 h-2 rounded-full ${dotBg}`} />
+                        <span className={`w-2 h-2 rounded-full ${dotBg} shrink-0`} />
                         <span className="font-semibold text-slate-200">{log.agentName}</span>
                       </div>
-                      <span className="font-mono text-[10px] text-slate-400">{log.timestamp}</span>
+                      <span className="font-mono text-[10px] text-slate-400 shrink-0 ml-2">{log.timestamp}</span>
                     </div>
                     <p className="text-xs font-medium text-cyan-300 ml-4">{log.action}</p>
-                    <p className="text-[11px] text-slate-400 ml-4 mt-0.5">{log.details}</p>
+                    <p className="text-[11px] text-slate-400 ml-4 mt-0.5 line-clamp-2">{log.details}</p>
                   </div>
                 );
               })
