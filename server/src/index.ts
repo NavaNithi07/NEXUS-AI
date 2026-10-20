@@ -960,6 +960,10 @@ app.post('/api/wallet/execute-safe', requireOperatorAuth, async (req: Request, r
     } catch (broadcastErr: any) {
       const capturedTxHash = broadcastErr.txHash || undefined;
       const isAmbiguousTimeout = Boolean(broadcastErr.isReceiptTimeout);
+      const isRevert = Boolean(broadcastErr.receipt?.status === 'reverted' || broadcastErr.message?.includes('REVERTED'));
+      const determinedStatus: 'submitted_pending_reconciliation' | 'reverted' | 'failed' = isAmbiguousTimeout
+        ? 'submitted_pending_reconciliation'
+        : (isRevert ? 'reverted' : 'failed');
 
       if (!isAmbiguousTimeout && !capturedTxHash) {
         try {
@@ -974,11 +978,11 @@ app.post('/api/wallet/execute-safe', requireOperatorAuth, async (req: Request, r
         agentName: agent.name,
         proposal,
         policyResult,
-        status: 'failed',
+        status: determinedStatus,
         txHash: capturedTxHash,
         explorerUrl: capturedTxHash ? `${config.blockExplorerUrl}/tx/${capturedTxHash}` : undefined,
         executedAt,
-        error: `Execution error: ${broadcastErr.message}.${isAmbiguousTimeout ? ' Broadcasted; awaiting receipt reconciliation.' : ' No on-chain transfer completed.'}`,
+        error: `Execution ${determinedStatus.toUpperCase()}: ${broadcastErr.message}.${isAmbiguousTimeout ? ' Broadcasted; awaiting receipt reconciliation.' : ''}`,
       };
 
       db.addAuditRecord({
@@ -989,10 +993,10 @@ app.post('/api/wallet/execute-safe', requireOperatorAuth, async (req: Request, r
         taskGoal: proposal.task,
         proposal,
         policyCheck: policyResult,
-        outcome: 'failed',
+        outcome: determinedStatus,
         txHash: capturedTxHash,
         explorerUrl: capturedTxHash ? `${config.blockExplorerUrl}/tx/${capturedTxHash}` : undefined,
-        details: `Execution FAILED: ${broadcastErr.message}. Wallet balance: ${balanceEth} ETH.`,
+        details: `Execution ${determinedStatus.toUpperCase()}: ${broadcastErr.message}. Wallet balance: ${balanceEth} ETH.`,
       });
     }
 

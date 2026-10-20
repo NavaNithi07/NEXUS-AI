@@ -23,6 +23,7 @@ import {
   Check,
 } from 'lucide-react';
 import { useAppStore } from '../store/appStore';
+import { getAuthToken } from '../lib/apiClient';
 
 interface SimulationDetails {
   valid: boolean;
@@ -90,7 +91,8 @@ export const TransactionBuilder: React.FC<TransactionBuilderProps> = ({
   onClose,
   initialRecipient = '',
 }) => {
-  const { onChainAddress, onChainBalanceEth, authToken } = useAppStore();
+  const { onChainAddress, onChainBalanceEth } = useAppStore();
+  const authToken = getAuthToken();
 
   // Form states
   const [recipient, setRecipient] = useState(initialRecipient);
@@ -197,6 +199,9 @@ export const TransactionBuilder: React.FC<TransactionBuilderProps> = ({
           ? data.violations.join('; ')
           : (data.error || data.message || 'Execution failed on-chain');
         setErrorMessage(errorMsg);
+        if (data.job?.txHash) {
+          setSubmittedTx(data.job);
+        }
         setStep('failed');
         return;
       }
@@ -708,9 +713,34 @@ export const TransactionBuilder: React.FC<TransactionBuilderProps> = ({
             <div className="space-y-1">
               <h3 className="text-lg font-bold text-white">Execution Halted</h3>
               <p className="text-xs text-gray-400">
-                Transaction was safely aborted before signing or reverted without state divergence
+                Transaction was safely aborted before signing or halted during confirmation
               </p>
             </div>
+
+            {submittedTx?.txHash && (
+              <div className="p-3 rounded-xl bg-gray-900 border border-gray-800 text-left space-y-2 max-w-md mx-auto">
+                <span className="text-xs text-amber-400 font-semibold block flex items-center gap-1.5">
+                  <AlertTriangle className="w-3.5 h-3.5" />
+                  Submitted Transaction Hash (Preserved for Reconciliation):
+                </span>
+                <div className="flex items-center justify-between p-2 rounded bg-[#0B0F19] text-xs font-mono text-cyan-400">
+                  <span className="truncate">{submittedTx.txHash}</span>
+                  <button onClick={() => copyToClipboard(submittedTx.txHash)} className="p-1 hover:text-white">
+                    {copiedHash ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                  </button>
+                </div>
+                {submittedTx.explorerUrl && (
+                  <a
+                    href={submittedTx.explorerUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="py-1.5 px-3 rounded bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 text-xs font-semibold flex items-center justify-center gap-1"
+                  >
+                    Inspect on BaseScan <ExternalLink className="w-3.5 h-3.5" />
+                  </a>
+                )}
+              </div>
+            )}
 
             <button
               onClick={() => {

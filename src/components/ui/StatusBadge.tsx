@@ -19,18 +19,22 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({
   let dotColor = 'bg-slate-400';
   let label = status;
 
-  if (normalized === 'active' || normalized === 'completed' || normalized === 'success') {
+  if (normalized === 'active' || normalized === 'completed' || normalized === 'success' || normalized === 'confirmed') {
     colorClasses = 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30';
     dotColor = 'bg-emerald-400';
-    label = 'Active';
-  } else if (normalized === 'paused' || normalized === 'pending' || normalized === 'warning') {
+    label = normalized === 'active' ? 'Active' : 'Confirmed';
+  } else if (normalized === 'reverted') {
+    colorClasses = 'bg-purple-500/10 text-purple-400 border-purple-500/30';
+    dotColor = 'bg-purple-400';
+    label = 'Reverted';
+  } else if (normalized === 'paused' || normalized === 'pending' || normalized === 'warning' || normalized === 'submitted_pending' || normalized === 'pending_reconciliation') {
     colorClasses = 'bg-amber-500/10 text-amber-400 border-amber-500/30';
     dotColor = 'bg-amber-400';
-    label = 'Paused';
-  } else if (normalized === 'stopped' || normalized === 'failed' || normalized === 'critical') {
+    label = normalized === 'paused' ? 'Paused' : (normalized === 'warning' ? 'Warning' : 'Pending');
+  } else if (normalized === 'stopped' || normalized === 'failed' || normalized === 'critical' || normalized === 'rejected') {
     colorClasses = 'bg-rose-500/10 text-rose-400 border-rose-500/30';
     dotColor = 'bg-rose-400';
-    label = 'Stopped';
+    label = normalized === 'rejected' ? 'Rejected' : (normalized === 'stopped' ? 'Stopped' : 'Failed');
   }
 
   const sizeClasses = {

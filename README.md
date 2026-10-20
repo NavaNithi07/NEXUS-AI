@@ -5,6 +5,19 @@
 
 ---
 
+## 🏆 Competition Deliverables & Evidence Index (Topic F)
+
+| Deliverable | Location | Description |
+| :--- | :--- | :--- |
+| **Technical Documentation** | [`docs/TECHNICAL_DOCUMENTATION.md`](docs/TECHNICAL_DOCUMENTATION.md) | Comprehensive architecture specification, API contracts, and enclave dataflow. |
+| **Security Self-Assessment** | [`docs/SECURITY_ASSESSMENT.md`](docs/SECURITY_ASSESSMENT.md) | Threat model, mitigation matrix, 10-point control audit, and KMS isolation. |
+| **Presentation Deck Outline**| [`docs/PRESENTATION_DECK.md`](docs/PRESENTATION_DECK.md) | 10-minute slide outline with live demonstration timing and speaker notes. |
+| **Demo Video Script** | [`docs/DEMO_VIDEO_SCRIPT.md`](docs/DEMO_VIDEO_SCRIPT.md) | 5-minute video walkthrough covering zero-trust auth, policy halts, and killswitch. |
+| **Evidence Package** | [`docs/EVIDENCE_PACKAGE.md`](docs/EVIDENCE_PACKAGE.md) | Verified test reports, Base Sepolia RPC metrics, and build artifacts. |
+| **Final Readiness Report** | [`docs/FINAL_READINESS_REPORT.md`](docs/FINAL_READINESS_REPORT.md) | Comprehensive audit breakdown and verified baseline checklist. |
+
+---
+
 ## 1. Architecture & Persistence Engine
 
 Nexus AI Wallet operates on an institutional Enclave Architecture:

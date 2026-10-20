@@ -457,8 +457,8 @@ export const useAppStore = create<AppState>()(
 
       togglePolicyStatus: (id) => {
         set((state) => {
-          const updated = state.spendingPolicies.map((p) =>
-            p.id === id ? { ...p, status: p.status === 'active' ? 'inactive' : 'active' } : p
+          const updated: SpendingPolicy[] = state.spendingPolicies.map((p) =>
+            p.id === id ? { ...p, status: (p.status === 'active' ? 'inactive' : 'active') as 'active' | 'inactive' } : p
           );
           const policy = updated.find((p) => p.id === id);
           if (policy) {

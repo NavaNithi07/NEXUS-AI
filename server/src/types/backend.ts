@@ -68,7 +68,7 @@ export interface ExecutionJobResult {
   agentName: string;
   proposal: TransactionProposal;
   policyResult: PolicyCheckResult;
-  status: 'confirmed' | 'rejected' | 'failed' | 'simulated';
+  status: 'confirmed' | 'rejected' | 'failed' | 'simulated' | 'reverted' | 'submitted_pending_reconciliation';
   txHash?: `0x${string}`;
   explorerUrl?: string;
   blockNumber?: number;
@@ -86,7 +86,7 @@ export interface AuditRecord {
   taskGoal: string;
   proposal: TransactionProposal;
   policyCheck: PolicyCheckResult;
-  outcome: 'confirmed' | 'rejected' | 'failed';
+  outcome: 'confirmed' | 'rejected' | 'failed' | 'reverted' | 'submitted_pending_reconciliation';
   txHash?: `0x${string}`;
   explorerUrl?: string;
   blockNumber?: number;
