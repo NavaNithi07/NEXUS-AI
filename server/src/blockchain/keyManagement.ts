@@ -98,7 +98,7 @@ export class LocalTestnetSignerProvider implements KeyManagementProvider {
       maxPriorityFeePerGas: request.maxPriorityFeePerGas,
       data: request.data,
       chain,
-    });
+    } as any);
 
     return txHash;
   }

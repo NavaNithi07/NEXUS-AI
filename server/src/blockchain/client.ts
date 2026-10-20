@@ -220,7 +220,7 @@ export async function sendNativeToken(
     maxFeePerGas: feeInfo.maxFeePerGas,
     maxPriorityFeePerGas: feeInfo.maxPriorityFeePerGas,
     chain: baseSepolia,
-  });
+  } as any);
 
   console.log(`[Blockchain] Broadcasted with hash: ${txHash}. Awaiting receipt...`);
 

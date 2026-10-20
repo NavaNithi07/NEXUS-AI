@@ -41,6 +41,7 @@ import {
   PolicyCreateInputSchema,
   type ExecutionJobResult,
   type AuditRecord,
+  type BackendAgent,
 } from './types/backend.js';
 import { initializeNeonSchema, syncSqliteToNeon } from './db/neon.js';
 
@@ -409,14 +410,22 @@ app.post('/api/agents', requireOperatorAuth, (req: Request, res: Response) => {
     return res.status(400).json({ error: 'Validation failed', details: parseResult.error.format() });
   }
 
+  const data = parseResult.data;
   const newAgent = db.addAgent({
     id: `ag-${Date.now().toString(36)}`,
-    ...parseResult.data,
+    name: data.name,
+    description: data.description,
+    type: data.type,
+    status: data.status,
+    balance: data.balance,
+    dailyLimit: data.dailyLimit,
+    maxTxAmount: data.maxTxAmount,
     spentToday: 0,
     txCount: 0,
     createdAt: new Date().toISOString().split('T')[0],
     lastActive: 'Just now',
-    allowedRecipients: parseResult.data.allowedRecipients as `0x${string}`[],
+    allowedRecipients: data.allowedRecipients as `0x${string}`[],
+    allowedTokens: data.allowedTokens,
   });
 
   res.status(201).json(newAgent);
@@ -730,14 +739,19 @@ app.post('/api/wallet/simulate', async (req: Request, res: Response) => {
   try {
     const { recipient, amountEth, calldata, chainId, agentId } = req.body || {};
 
-    const agent = (agentId ? db.getAgent(agentId) : null) || db.getAgents()[0] || {
+    const agent: BackendAgent = (agentId ? db.getAgent(agentId) : null) || db.getAgents()[0] || {
       id: 'agt-builder',
       name: 'Transaction Builder Safe Enclave',
+      description: 'Transaction Builder Safe Enclave Agent',
+      type: 'Treasury Safe Transfer',
       status: 'active' as const,
-      role: 'Treasury Safe Transfer',
-      maxTxAmount: 1.0,
+      balance: 10.0,
       dailyLimit: 2.0,
+      maxTxAmount: 1.0,
       spentToday: 0,
+      txCount: 0,
+      createdAt: '2026-01-01',
+      lastActive: 'Just now',
       allowedTokens: ['ETH', 'USDC'],
       allowedRecipients: [],
     };
@@ -842,14 +856,19 @@ app.post('/api/wallet/execute-safe', requireOperatorAuth, async (req: Request, r
     }
 
     // 5. Select agent and policies for authoritative evaluation
-    const agent = (agentId ? db.getAgent(agentId) : null) || db.getAgents()[0] || {
+    const agent: BackendAgent = (agentId ? db.getAgent(agentId) : null) || db.getAgents()[0] || {
       id: 'agt-builder',
       name: 'Transaction Builder Safe Enclave',
+      description: 'Transaction Builder Safe Enclave Agent',
+      type: 'Treasury Safe Transfer',
       status: 'active' as const,
-      role: 'Treasury Safe Transfer',
-      maxTxAmount: 1.0,
+      balance: 10.0,
       dailyLimit: 2.0,
+      maxTxAmount: 1.0,
       spentToday: 0,
+      txCount: 0,
+      createdAt: '2026-01-01',
+      lastActive: 'Just now',
       allowedTokens: ['ETH', 'USDC'],
       allowedRecipients: [],
     };
@@ -1012,9 +1031,17 @@ app.post('/api/policies', requireOperatorAuth, (req: Request, res: Response) => 
     return res.status(400).json({ error: 'Validation failed', details: parseResult.error.format() });
   }
 
+  const pData = parseResult.data;
   const newPolicy = db.addPolicy({
     id: `pol-${Date.now().toString(36)}`,
-    ...parseResult.data,
+    name: pData.name,
+    description: pData.description,
+    targetAgent: pData.targetAgent,
+    maxDailySpend: pData.maxDailySpend,
+    maxSingleTx: pData.maxSingleTx,
+    requireApprovalAbove: pData.requireApprovalAbove,
+    allowedTokens: pData.allowedTokens,
+    status: pData.status,
   });
 
   res.status(201).json(newPolicy);
